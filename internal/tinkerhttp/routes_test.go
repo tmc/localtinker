@@ -497,6 +497,112 @@ func TestConformanceMalformedTrainingInputsReturnUserErrors(t *testing.T) {
 	}
 }
 
+func TestConformanceMalformedAsyncRequestsReturnBadRequest(t *testing.T) {
+	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+
+	var errResp ErrorResponse
+	postJSONStatus(t, h, "/api/v1/create_model",
+		map[string]any{"base_model": "Qwen/Qwen3-8B"},
+		http.StatusBadRequest,
+		&errResp,
+	)
+	if errResp.Code != "bad_request" || errResp.Message != "missing session_id" {
+		t.Fatalf("create_model response = %#v", errResp)
+	}
+
+	validInput := map[string]any{
+		"loss_fn": "cross_entropy",
+		"data": []any{
+			map[string]any{
+				"model_input": map[string]any{
+					"chunks": []any{
+						map[string]any{"type": "encoded_text", "tokens": []int{1}},
+					},
+				},
+				"loss_fn_inputs": map[string]any{
+					"target_tokens": map[string]any{"data": []int{1}, "dtype": "int64"},
+				},
+			},
+		},
+	}
+	postJSONStatus(t, h, "/api/v1/forward",
+		map[string]any{"forward_input": validInput},
+		http.StatusBadRequest,
+		&errResp,
+	)
+	if errResp.Code != "bad_request" || errResp.Message != "missing model_id" {
+		t.Fatalf("forward response = %#v", errResp)
+	}
+
+	postJSONStatus(t, h, "/api/v1/optim_step",
+		map[string]any{"adam_params": map[string]any{"learning_rate": 1e-4}},
+		http.StatusBadRequest,
+		&errResp,
+	)
+	if errResp.Code != "bad_request" || errResp.Message != "missing model_id" {
+		t.Fatalf("optim_step response = %#v", errResp)
+	}
+
+	tests := []struct {
+		name string
+		req  map[string]any
+		want string
+	}{
+		{
+			name: "missing model reference",
+			req: map[string]any{
+				"num_samples":     1,
+				"prompt":          map[string]any{"chunks": []any{map[string]any{"tokens": []int{1}}}},
+				"sampling_params": map[string]any{"max_tokens": 1},
+			},
+			want: "missing sampling_session_id, model_path, or base_model",
+		},
+		{
+			name: "bad sample count",
+			req: map[string]any{
+				"sampling_session_id": "sample-a",
+				"num_samples":         0,
+				"prompt":              map[string]any{"chunks": []any{map[string]any{"tokens": []int{1}}}},
+				"sampling_params":     map[string]any{"max_tokens": 1},
+			},
+			want: "num_samples must be positive",
+		},
+		{
+			name: "bad max tokens",
+			req: map[string]any{
+				"sampling_session_id": "sample-a",
+				"num_samples":         1,
+				"prompt":              map[string]any{"chunks": []any{map[string]any{"tokens": []int{1}}}},
+				"sampling_params":     map[string]any{"max_tokens": 0},
+			},
+			want: "max_tokens must be positive",
+		},
+		{
+			name: "empty prompt",
+			req: map[string]any{
+				"sampling_session_id": "sample-a",
+				"num_samples":         1,
+				"prompt":              map[string]any{"chunks": []any{map[string]any{"tokens": []int{}}}},
+				"sampling_params":     map[string]any{"max_tokens": 1},
+			},
+			want: "prompt is empty",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var resp map[string]string
+			postJSONStatus(t, h, "/api/v1/asample", tt.req, http.StatusBadRequest, &resp)
+			if resp["category"] != "user" || resp["error"] != tt.want {
+				t.Fatalf("response = %#v, want user error %q", resp, tt.want)
+			}
+		})
+	}
+}
+
 func TestCreateModelGetInfoAndUnload(t *testing.T) {
 	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
