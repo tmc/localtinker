@@ -28,6 +28,7 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
 - Admin RPC exposes run summaries and run inspection payloads from coordinator
   state.
 - Node report streams update visible node lifecycle and telemetry labels.
+- Checkpoint TTL metadata is enforced in listings and archive URL requests.
 - `tinker` contains the experimental Go API.
 - The HTTP API enforces the request byte limit advertised in client config.
 
@@ -159,8 +160,8 @@ Goal: keep local behavior honest against hosted Tinker.
 - Prompt logprobs and top-k prompt logprobs are not implemented.
 - String stops need tokenizer-backed sampling.
 - Optimizer state is not persisted.
-- Checkpoint archive URLs point at local tar files; hosted download, ownership,
-  and retention policy enforcement remain incomplete.
+- Checkpoint archive URLs point at local tar files; hosted download and
+  ownership enforcement remain incomplete.
 - The MLX dependency graph still needs temporary sibling-checkout replaces.
 - Hosted numerics and local MLX numerics will differ.
 
