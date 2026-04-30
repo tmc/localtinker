@@ -52,17 +52,20 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
   tokens.
 - `tinker` contains the experimental Go API.
 - The HTTP API enforces the request byte limit advertised in client config.
+- SDK conformance coverage includes handshake, empty REST listings, missing
+  future errors, malformed training inputs, and a full MLX smoke workflow.
 
 ## 1. SDK Conformance
 
 Goal: make the Python SDK see localtinker as a normal Tinker endpoint for the
 supported surface.
 
-- Add a conformance suite driven by the upstream Python SDK.
-- Cover session creation, heartbeat, futures, model creation, `forward`,
-  `forward_backward`, `optim_step`, save/load weights, sampler sessions,
-  sampling, run listing, checkpoint listing, archive URL, publish, unpublish,
-  TTL, and delete.
+- Expand the upstream Python SDK conformance suite beyond the current
+  handshake, error, malformed-input, and MLX smoke coverage.
+- Keep coverage for session creation, heartbeat, futures, model creation,
+  `forward`, `forward_backward`, `optim_step`, save/load weights, sampler
+  sessions, sampling, run listing, checkpoint listing, archive URL, publish,
+  unpublish, TTL, and delete.
 - Match hosted error response shapes and categories.
 - Keep unsupported capabilities explicit in server capabilities.
 - Add malformed `loss_fn_inputs` fixtures.
@@ -190,7 +193,7 @@ Goal: keep local behavior honest against hosted Tinker.
 
 ## Next Milestones
 
-1. Add SDK conformance tests for all currently supported routes.
+1. Expand SDK conformance tests for all currently supported routes.
 2. Replace shifted-token-only loss handling with dense CE tensors.
 3. Add hosted-style checkpoint download ownership and retention enforcement.
 4. Add operation queue state and asynchronous futures.
