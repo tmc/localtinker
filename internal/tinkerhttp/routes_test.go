@@ -145,7 +145,8 @@ func TestWeightsInfoRejectsMalformedJSON(t *testing.T) {
 }
 
 func TestRetrieveFutureRoute(t *testing.T) {
-	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	store := tinkerdb.OpenMemory()
+	c, err := tinkercoord.New(tinkercoord.Config{Store: store})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,6 +163,9 @@ func TestRetrieveFutureRoute(t *testing.T) {
 	if got.Status != tinkercoord.FutureCompleteMetadata {
 		t.Fatalf("status = %q, want %q", got.Status, tinkercoord.FutureCompleteMetadata)
 	}
+	if got.FutureID != future.ID || got.RequestID != future.ID {
+		t.Fatalf("metadata future ids = %#v, want %q", got, future.ID)
+	}
 
 	var result map[string]bool
 	postJSON(t, New(c).Handler(), "/api/v1/retrieve_future",
@@ -170,6 +174,19 @@ func TestRetrieveFutureRoute(t *testing.T) {
 	)
 	if !result["ok"] {
 		t.Fatalf("result = %#v, want ok", result)
+	}
+
+	queued := tinkerdb.Future{ID: "fut-queued", State: tinkercoord.FutureQueued}
+	if err := store.PutFuture(nil, queued); err != nil {
+		t.Fatal(err)
+	}
+	var pending RetrieveFutureResponse
+	postJSON(t, New(c).Handler(), "/api/v1/retrieve_future",
+		RetrieveFutureRequest{FutureID: queued.ID, AllowMetadataOnly: true},
+		&pending,
+	)
+	if pending.Type != "try_again" || pending.FutureID != queued.ID || pending.RequestID != queued.ID {
+		t.Fatalf("pending = %#v", pending)
 	}
 }
 
@@ -195,6 +212,9 @@ func TestUnsupportedOperationReturnsFutureFailure(t *testing.T) {
 	)
 	if failed["category"] != "user" || failed["error"] == "" {
 		t.Fatalf("failed = %#v", failed)
+	}
+	if failed["future_id"] != future.RequestID || failed["request_id"] != future.RequestID {
+		t.Fatalf("failed ids = %#v, want %q", failed, future.RequestID)
 	}
 }
 

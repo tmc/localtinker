@@ -756,25 +756,31 @@ func (s *Server) writeFutureResult(w http.ResponseWriter, future tinkercoord.Fut
 	case tinkercoord.FutureTryAgain, tinkercoord.FutureQueued, tinkercoord.FutureRunning:
 		writeJSON(w, http.StatusOK, RetrieveFutureResponse{
 			Type:       "try_again",
+			FutureID:   future.ID,
 			RequestID:  future.ID,
 			QueueState: "active",
 		})
 	case tinkercoord.FutureCompleteMetadata:
 		writeJSON(w, http.StatusOK, RetrieveFutureResponse{
 			Status:              "complete_metadata",
+			FutureID:            future.ID,
 			RequestID:           future.ID,
 			Metadata:            future.Metadata,
 			ResponsePayloadSize: len(future.Result),
 		})
 	case tinkercoord.FutureUserError:
 		writeJSON(w, http.StatusOK, map[string]any{
-			"error":    errorMessage(future.Error),
-			"category": "user",
+			"error":      errorMessage(future.Error),
+			"category":   "user",
+			"future_id":  future.ID,
+			"request_id": future.ID,
 		})
 	case tinkercoord.FutureSystemError, tinkercoord.FutureCanceled:
 		writeJSON(w, http.StatusOK, map[string]any{
-			"error":    errorMessage(future.Error),
-			"category": "server",
+			"error":      errorMessage(future.Error),
+			"category":   "server",
+			"future_id":  future.ID,
+			"request_id": future.ID,
 		})
 	default:
 		if len(future.Result) == 0 {
