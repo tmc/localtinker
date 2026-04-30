@@ -26,6 +26,10 @@ type Store interface {
 	PutFuture(context.Context, Future) error
 	GetFuture(context.Context, string) (Future, error)
 	ListFutures(context.Context) ([]Future, error)
+	PutCheckpoint(context.Context, Checkpoint) error
+	GetCheckpoint(context.Context, string) (Checkpoint, error)
+	ListCheckpoints(context.Context) ([]Checkpoint, error)
+	DeleteCheckpoint(context.Context, string) error
 	Close() error
 }
 
@@ -58,6 +62,13 @@ type Model struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+type Checkpoint struct {
+	Path      string     `json:"path"`
+	Public    bool       `json:"public"`
+	Owner     string     `json:"owner,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
 type JSONStore struct {
 	mu   sync.Mutex
 	path string
@@ -65,9 +76,10 @@ type JSONStore struct {
 }
 
 type diskState struct {
-	Sessions map[string]Session `json:"sessions"`
-	Models   map[string]Model   `json:"models"`
-	Futures  map[string]Future  `json:"futures"`
+	Sessions    map[string]Session    `json:"sessions"`
+	Models      map[string]Model      `json:"models"`
+	Futures     map[string]Future     `json:"futures"`
+	Checkpoints map[string]Checkpoint `json:"checkpoints"`
 }
 
 func OpenJSON(path string) (*JSONStore, error) {
@@ -81,9 +93,10 @@ func OpenJSON(path string) (*JSONStore, error) {
 func OpenMemory() *JSONStore {
 	return &JSONStore{
 		data: diskState{
-			Sessions: make(map[string]Session),
-			Models:   make(map[string]Model),
-			Futures:  make(map[string]Future),
+			Sessions:    make(map[string]Session),
+			Models:      make(map[string]Model),
+			Futures:     make(map[string]Future),
+			Checkpoints: make(map[string]Checkpoint),
 		},
 	}
 }
@@ -195,6 +208,41 @@ func (s *JSONStore) ListFutures(_ context.Context) ([]Future, error) {
 	return futures, nil
 }
 
+func (s *JSONStore) PutCheckpoint(_ context.Context, checkpoint Checkpoint) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.init()
+	s.data.Checkpoints[checkpoint.Path] = checkpoint
+	return s.saveLocked()
+}
+
+func (s *JSONStore) GetCheckpoint(_ context.Context, path string) (Checkpoint, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	checkpoint, ok := s.data.Checkpoints[path]
+	if !ok {
+		return Checkpoint{}, ErrNotFound
+	}
+	return checkpoint, nil
+}
+
+func (s *JSONStore) ListCheckpoints(_ context.Context) ([]Checkpoint, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	checkpoints := make([]Checkpoint, 0, len(s.data.Checkpoints))
+	for _, checkpoint := range s.data.Checkpoints {
+		checkpoints = append(checkpoints, checkpoint)
+	}
+	return checkpoints, nil
+}
+
+func (s *JSONStore) DeleteCheckpoint(_ context.Context, path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.data.Checkpoints, path)
+	return s.saveLocked()
+}
+
 func (s *JSONStore) Close() error { return nil }
 
 func (s *JSONStore) load() error {
@@ -249,5 +297,8 @@ func (s *JSONStore) init() {
 	}
 	if s.data.Futures == nil {
 		s.data.Futures = make(map[string]Future)
+	}
+	if s.data.Checkpoints == nil {
+		s.data.Checkpoints = make(map[string]Checkpoint)
 	}
 }

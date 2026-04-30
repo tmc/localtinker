@@ -483,6 +483,34 @@ func CheckpointArchive(path string) (string, error) {
 	return archive, nil
 }
 
+func CheckpointSize(path string) (int64, error) {
+	parsed, err := ParseTinkerPath(path)
+	if err != nil {
+		return 0, err
+	}
+	var size int64
+	err = filepath.WalkDir(checkpointDir(parsed), func(name string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			size += info.Size()
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("size checkpoint: %w", err)
+	}
+	return size, nil
+}
+
 func CheckpointFile(path string) (string, error) {
 	parsed, err := ParseTinkerPath(path)
 	if err != nil {
