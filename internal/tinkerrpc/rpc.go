@@ -502,8 +502,12 @@ func (s *Server) GetManifest(_ context.Context, req *connect.Request[tinkerv1.Ge
 }
 
 func (s *Server) DeleteAlias(_ context.Context, req *connect.Request[tinkerv1.DeleteAliasRequest]) (*connect.Response[tinkerv1.DeleteAliasResponse], error) {
+	alias := strings.TrimSpace(req.Msg.GetAlias())
+	if alias == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("missing alias"))
+	}
 	s.mu.Lock()
-	delete(s.aliases, req.Msg.GetAlias())
+	delete(s.aliases, alias)
 	s.mu.Unlock()
 	return connect.NewResponse(&tinkerv1.DeleteAliasResponse{}), nil
 }

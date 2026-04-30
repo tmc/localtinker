@@ -463,6 +463,66 @@ func TestArtifactTrackerManifestInventoryAndPeers(t *testing.T) {
 	}
 }
 
+func TestArtifactTrackerDeleteAlias(t *testing.T) {
+	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc, err := New(coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	rpc.Register(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	tracker := tinkerv1connect.NewArtifactTrackerClient(server.Client(), server.URL)
+	manifest := &tinkerv1.Manifest{
+		Kind:      "training_checkpoint",
+		Storage:   "tinker",
+		Name:      "ckpt",
+		RootHash:  "abc123",
+		ChunkSize: 4,
+		Files: []*tinkerv1.ManifestFile{{
+			Path:   "weights.bin",
+			Size:   4,
+			Sha256: "file",
+			Chunks: []*tinkerv1.ChunkRef{{Index: 0, Size: 4, Sha256: "chunk"}},
+		}},
+	}
+	if _, err := tracker.PublishManifest(context.Background(), connect.NewRequest(&tinkerv1.PublishManifestRequest{
+		Manifest: manifest,
+		Alias:    "latest",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tracker.GetManifest(context.Background(), connect.NewRequest(&tinkerv1.GetManifestRequest{
+		RootHashOrAlias: "latest",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tracker.DeleteAlias(context.Background(), connect.NewRequest(&tinkerv1.DeleteAliasRequest{
+		Alias: " latest ",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tracker.GetManifest(context.Background(), connect.NewRequest(&tinkerv1.GetManifestRequest{
+		RootHashOrAlias: "latest",
+	})); err == nil {
+		t.Fatal("get deleted alias succeeded")
+	}
+	if _, err := tracker.GetManifest(context.Background(), connect.NewRequest(&tinkerv1.GetManifestRequest{
+		RootHashOrAlias: "abc123",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tracker.DeleteAlias(context.Background(), connect.NewRequest(&tinkerv1.DeleteAliasRequest{})); err == nil {
+		t.Fatal("delete empty alias succeeded")
+	}
+}
+
 func TestApplyRetentionUpdatesNodeInventory(t *testing.T) {
 	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
