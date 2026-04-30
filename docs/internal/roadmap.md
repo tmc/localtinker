@@ -53,7 +53,8 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
 - `tinker` contains the experimental Go API.
 - The HTTP API enforces the request byte limit advertised in client config.
 - SDK conformance coverage includes handshake, empty REST listings, missing
-  future errors, malformed training inputs, and a full MLX smoke workflow.
+  future errors, malformed training and async inputs, future id echoing, and a
+  full MLX smoke workflow.
 
 ## 1. SDK Conformance
 
@@ -66,9 +67,9 @@ supported surface.
   `forward`, `forward_backward`, `optim_step`, save/load weights, sampler
   sessions, sampling, run listing, checkpoint listing, archive URL, publish,
   unpublish, TTL, and delete.
-- Match hosted error response shapes and categories.
+- Match hosted error response shapes, categories, and future id fields.
 - Keep unsupported capabilities explicit in server capabilities.
-- Add malformed `loss_fn_inputs` fixtures.
+- Expand malformed request fixtures as new supported routes are added.
 
 ## 2. Cross-Entropy Contract
 
