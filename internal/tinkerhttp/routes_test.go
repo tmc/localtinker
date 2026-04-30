@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -332,6 +334,64 @@ func TestCreateModelGetInfoAndUnload(t *testing.T) {
 	}
 }
 
+func TestCheckpointActionsTrackMetadata(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LOCALTINKER_CHECKPOINT_ROOT", root)
+	if err := os.MkdirAll(filepath.Join(root, "model-a", "weights", "ckpt"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "model-a", "weights", "ckpt", "adapters.safetensors"), []byte("weights"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CompleteFuture(nil, map[string]any{
+		"type": "save_weights",
+		"path": "tinker://model-a/weights/ckpt",
+	}, map[string]any{
+		"type":     "save_weights",
+		"model_id": "model-a",
+		"path":     "tinker://model-a/weights/ckpt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+	base := "/api/v1/training_runs/model-a/checkpoints/weights/ckpt"
+
+	methodJSON(t, h, http.MethodPost, base+"/publish", nil, http.StatusOK, &map[string]any{})
+	checkpoints := checkpointList(t, h)
+	if len(checkpoints) != 1 {
+		t.Fatalf("checkpoints = %#v, want one", checkpoints)
+	}
+	if !checkpoints[0].Public {
+		t.Fatalf("published checkpoint = %#v", checkpoints[0])
+	}
+	if checkpoints[0].SizeBytes == nil || *checkpoints[0].SizeBytes != int64(len("weights")) {
+		t.Fatalf("size bytes = %#v", checkpoints[0].SizeBytes)
+	}
+
+	methodJSON(t, h, http.MethodPut, base+"/ttl", map[string]any{"ttl": 3600}, http.StatusOK, &map[string]any{})
+	checkpoints = checkpointList(t, h)
+	if checkpoints[0].ExpiresAt == nil {
+		t.Fatalf("ttl checkpoint = %#v", checkpoints[0])
+	}
+
+	methodJSON(t, h, http.MethodDelete, base+"/publish", nil, http.StatusOK, &map[string]any{})
+	checkpoints = checkpointList(t, h)
+	if checkpoints[0].Public {
+		t.Fatalf("unpublished checkpoint = %#v", checkpoints[0])
+	}
+
+	methodJSON(t, h, http.MethodDelete, base, nil, http.StatusOK, &map[string]any{})
+	checkpoints = checkpointList(t, h)
+	if len(checkpoints) != 0 {
+		t.Fatalf("checkpoints after delete = %#v", checkpoints)
+	}
+}
+
 func postJSON(t *testing.T, h http.Handler, path string, in any, out any) {
 	t.Helper()
 	postJSONStatus(t, h, path, in, http.StatusOK, out)
@@ -352,13 +412,18 @@ func decodeDatum(t *testing.T, in any) tinkertrain.Datum {
 
 func postJSONStatus(t *testing.T, h http.Handler, path string, in any, wantStatus int, out any) {
 	t.Helper()
+	methodJSON(t, h, http.MethodPost, path, in, wantStatus, out)
+}
+
+func methodJSON(t *testing.T, h http.Handler, method, path string, in any, wantStatus int, out any) {
+	t.Helper()
 	var body bytes.Buffer
 	if in != nil {
 		if err := json.NewEncoder(&body).Encode(in); err != nil {
 			t.Fatal(err)
 		}
 	}
-	req := httptest.NewRequest("POST", path, &body)
+	req := httptest.NewRequest(method, path, &body)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != wantStatus {
@@ -367,6 +432,13 @@ func postJSONStatus(t *testing.T, h http.Handler, path string, in any, wantStatu
 	if err := json.NewDecoder(rec.Body).Decode(out); err != nil {
 		t.Fatalf("decode %s: %v", path, err)
 	}
+}
+
+func checkpointList(t *testing.T, h http.Handler) []tinkercoord.Checkpoint {
+	t.Helper()
+	var resp tinkercoord.CheckpointsResponse
+	getJSON(t, h, "/api/v1/checkpoints", &resp)
+	return resp.Checkpoints
 }
 
 func getJSON(t *testing.T, h http.Handler, path string, out any) {

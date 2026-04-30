@@ -108,6 +108,7 @@ type Checkpoint struct {
 	SizeBytes      *int64     `json:"size_bytes,omitempty"`
 	Public         bool       `json:"public"`
 	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	Owner          string     `json:"owner,omitempty"`
 }
 
 type CheckpointsResponse struct {
@@ -577,10 +578,59 @@ func (c *Coordinator) Sample(ctx context.Context, req tinkertrain.SampleRequest)
 	})
 }
 
+func (c *Coordinator) SetCheckpointPublic(ctx context.Context, path string, public bool) error {
+	checkpoint, err := c.checkpointMetadata(ctx, path)
+	if err != nil {
+		return err
+	}
+	checkpoint.Public = public
+	return c.store.PutCheckpoint(ctx, checkpoint)
+}
+
+func (c *Coordinator) SetCheckpointTTL(ctx context.Context, path string, ttl time.Duration) error {
+	checkpoint, err := c.checkpointMetadata(ctx, path)
+	if err != nil {
+		return err
+	}
+	if ttl <= 0 {
+		checkpoint.ExpiresAt = nil
+	} else {
+		expires := c.now().UTC().Add(ttl)
+		checkpoint.ExpiresAt = &expires
+	}
+	return c.store.PutCheckpoint(ctx, checkpoint)
+}
+
+func (c *Coordinator) DeleteCheckpointMetadata(ctx context.Context, path string) error {
+	return c.store.DeleteCheckpoint(ctx, path)
+}
+
+func (c *Coordinator) checkpointMetadata(ctx context.Context, path string) (tinkerdb.Checkpoint, error) {
+	checkpoint, err := c.store.GetCheckpoint(ctx, path)
+	if err == nil {
+		return checkpoint, nil
+	}
+	if !errors.Is(err, tinkerdb.ErrNotFound) {
+		return tinkerdb.Checkpoint{}, err
+	}
+	return tinkerdb.Checkpoint{
+		Path:  path,
+		Owner: "local",
+	}, nil
+}
+
 func (c *Coordinator) checkpointRecords(ctx context.Context) ([]Checkpoint, error) {
 	futures, err := c.store.ListFutures(ctx)
 	if err != nil {
 		return nil, err
+	}
+	metadata, err := c.store.ListCheckpoints(ctx)
+	if err != nil {
+		return nil, err
+	}
+	metaByPath := make(map[string]tinkerdb.Checkpoint, len(metadata))
+	for _, meta := range metadata {
+		metaByPath[meta.Path] = meta
 	}
 	seen := make(map[string]bool)
 	var checkpoints []Checkpoint
@@ -604,12 +654,23 @@ func (c *Coordinator) checkpointRecords(ctx context.Context) ([]Checkpoint, erro
 		if at.IsZero() {
 			at = future.CreatedAt
 		}
+		size, err := tinkertrain.CheckpointSize(path)
+		if err != nil {
+			continue
+		}
+		meta := metaByPath[path]
+		if meta.Owner == "" {
+			meta.Owner = "local"
+		}
 		checkpoints = append(checkpoints, Checkpoint{
 			CheckpointID:   parsed.Kind + "/" + parsed.Name,
 			CheckpointType: typ,
 			Time:           at,
 			TinkerPath:     path,
-			Public:         false,
+			SizeBytes:      &size,
+			Public:         meta.Public,
+			ExpiresAt:      meta.ExpiresAt,
+			Owner:          meta.Owner,
 		})
 		seen[path] = true
 	}

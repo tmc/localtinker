@@ -707,12 +707,33 @@ func (s *Server) checkpointAction(w http.ResponseWriter, r *http.Request, path s
 			writeError(w, http.StatusInternalServerError, "system_error", err.Error())
 			return true
 		}
+		if err := s.coord.DeleteCheckpointMetadata(r.Context(), tinkerPath); err != nil {
+			writeError(w, http.StatusInternalServerError, "system_error", err.Error())
+			return true
+		}
 		writeJSON(w, http.StatusOK, map[string]any{})
 	case r.Method == http.MethodPost && action == "publish":
-		writeJSON(w, http.StatusOK, map[string]any{})
+		if err := s.coord.SetCheckpointPublic(r.Context(), tinkerPath, true); err != nil {
+			writeError(w, http.StatusInternalServerError, "system_error", err.Error())
+			return true
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"public": true})
 	case r.Method == http.MethodDelete && action == "publish":
-		writeJSON(w, http.StatusOK, map[string]any{})
+		if err := s.coord.SetCheckpointPublic(r.Context(), tinkerPath, false); err != nil {
+			writeError(w, http.StatusInternalServerError, "system_error", err.Error())
+			return true
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"public": false})
 	case r.Method == http.MethodPut && action == "ttl":
+		ttl, err := decodeTTL(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return true
+		}
+		if err := s.coord.SetCheckpointTTL(r.Context(), tinkerPath, ttl); err != nil {
+			writeError(w, http.StatusInternalServerError, "system_error", err.Error())
+			return true
+		}
 		writeJSON(w, http.StatusOK, map[string]any{})
 	default:
 		writeError(w, http.StatusNotFound, "not_found", "unsupported checkpoint route")
@@ -835,4 +856,41 @@ func intQuery(r *http.Request, name string, def int) int {
 		return def
 	}
 	return n
+}
+
+func decodeTTL(r *http.Request) (time.Duration, error) {
+	var req struct {
+		TTL        *float64 `json:"ttl"`
+		TTLSeconds *float64 `json:"ttl_seconds"`
+		ExpiresIn  *float64 `json:"expires_in"`
+		ExpiresAt  string   `json:"expires_at"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		return 0, err
+	}
+	seconds := req.TTL
+	if seconds == nil {
+		seconds = req.TTLSeconds
+	}
+	if seconds == nil {
+		seconds = req.ExpiresIn
+	}
+	if seconds != nil {
+		if *seconds < 0 {
+			return 0, errors.New("ttl is negative")
+		}
+		return time.Duration(*seconds * float64(time.Second)), nil
+	}
+	if req.ExpiresAt != "" {
+		at, err := time.Parse(time.RFC3339, req.ExpiresAt)
+		if err != nil {
+			return 0, fmt.Errorf("parse expires_at: %w", err)
+		}
+		ttl := time.Until(at)
+		if ttl < 0 {
+			return 0, nil
+		}
+		return ttl, nil
+	}
+	return 0, nil
 }
