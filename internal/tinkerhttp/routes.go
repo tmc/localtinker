@@ -194,27 +194,6 @@ func (s *Server) retrieveFuture(w http.ResponseWriter, r *http.Request) {
 	s.writeFutureResult(w, future)
 }
 
-func (s *Server) unsupportedFuture(message string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var raw json.RawMessage
-		if err := decodeJSON(r, &raw); err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-		future, err := s.coord.UserErrorFuture(r.Context(), message)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "system_error", err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, FutureResponse{
-			FutureID:  future.ID,
-			RequestID: future.ID,
-			ID:        future.ID,
-			ModelID:   modelID(raw),
-		})
-	}
-}
-
 func (s *Server) createModel(w http.ResponseWriter, r *http.Request) {
 	var req tinkercoord.CreateModelRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -854,16 +833,6 @@ func writeUserError(w http.ResponseWriter, code int, message string) {
 		"error":    message,
 		"category": "user",
 	})
-}
-
-func modelID(raw json.RawMessage) string {
-	var body map[string]json.RawMessage
-	if len(raw) == 0 || json.Unmarshal(raw, &body) != nil {
-		return ""
-	}
-	var id string
-	_ = json.Unmarshal(body["model_id"], &id)
-	return id
 }
 
 func errorMessage(raw json.RawMessage) string {
