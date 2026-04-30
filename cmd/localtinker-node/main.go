@@ -200,6 +200,9 @@ func watchCommands(ctx context.Context, client tinkerv1connect.TinkerCoordinator
 		}
 		for stream.Receive() {
 			cmd := stream.Msg()
+			if err := reportCommandAck(ctx, client, nodeID, cmd); err != nil {
+				log.Printf("ack command %s: %v", cmd.GetCommandId(), err)
+			}
 			if cmd.GetDrain() != nil {
 				log.Printf("drain command %s: %s", cmd.GetCommandId(), cmd.GetDrain().GetReason())
 				cancel()
@@ -214,6 +217,23 @@ func watchCommands(ctx context.Context, client tinkerv1connect.TinkerCoordinator
 			return
 		}
 	}
+}
+
+func reportCommandAck(ctx context.Context, client tinkerv1connect.TinkerCoordinatorClient, nodeID string, cmd *tinkerv1.NodeCommand) error {
+	stream := client.Report(ctx)
+	if err := stream.Send(&tinkerv1.NodeEvent{
+		NodeId:      nodeID,
+		CommandId:   cmd.GetCommandId(),
+		LeaseId:     cmd.GetLeaseId(),
+		OperationId: cmd.GetOperationId(),
+		Kind:        cmd.GetKind(),
+		UnixNano:    time.Now().UnixNano(),
+		Payload:     &tinkerv1.NodeEvent_Ack{Ack: &tinkerv1.CommandAck{}},
+	}); err != nil {
+		return err
+	}
+	_, err := stream.CloseAndReceive()
+	return err
 }
 
 func sleepContext(ctx context.Context, d time.Duration) bool {
