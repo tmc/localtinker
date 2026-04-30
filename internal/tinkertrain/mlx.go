@@ -613,6 +613,9 @@ func stopTokenSequences(v any) [][]int {
 	if v == nil {
 		return nil
 	}
+	if token, ok := scalarStopToken(v); ok {
+		return [][]int{{token}}
+	}
 	data, err := json.Marshal(v)
 	if err != nil {
 		return nil
@@ -626,6 +629,34 @@ func stopTokenSequences(v any) [][]int {
 		return many
 	}
 	return nil
+}
+
+func scalarStopToken(v any) (int, bool) {
+	switch v := v.(type) {
+	case int:
+		if v >= 0 {
+			return v, true
+		}
+	case int32:
+		if v >= 0 {
+			return int(v), true
+		}
+	case int64:
+		if v >= 0 && int64(int(v)) == v {
+			return int(v), true
+		}
+	case float64:
+		token := int(v)
+		if v >= 0 && float64(token) == v {
+			return token, true
+		}
+	case json.Number:
+		n, err := v.Int64()
+		if err == nil && n >= 0 && int64(int(n)) == n {
+			return int(n), true
+		}
+	}
+	return 0, false
 }
 
 func matchesStop(tokens []int, stops [][]int) bool {
