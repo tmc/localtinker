@@ -200,6 +200,10 @@ func (s *Server) createModel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	if req.SessionID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "missing session_id")
+		return
+	}
 	future, model, err := s.coord.CreateModel(r.Context(), req)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "system_error", err.Error())
@@ -217,6 +221,10 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request) {
 	var req trainingRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if req.ModelID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "missing model_id")
 		return
 	}
 	input := firstInput(req.ForwardInput, req.ForwardBackwardInput)
@@ -244,6 +252,10 @@ func (s *Server) forwardBackward(w http.ResponseWriter, r *http.Request) {
 	var req trainingRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if req.ModelID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "missing model_id")
 		return
 	}
 	input := firstInput(req.ForwardBackwardInput, req.ForwardInput)
@@ -274,6 +286,10 @@ func (s *Server) optimStep(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if req.ModelID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "missing model_id")
 		return
 	}
 	future, err := s.coord.OptimStep(r.Context(), req.ModelID, req.AdamParams)
@@ -426,6 +442,10 @@ func (s *Server) asample(w http.ResponseWriter, r *http.Request) {
 	var req tinkertrain.SampleRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if err := validateSampleRequest(req); err != nil {
+		writeUserError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	future, err := s.coord.Sample(r.Context(), req)
@@ -592,6 +612,22 @@ func tokenCount(input tinkertrain.ModelInput) int {
 		}
 	}
 	return n
+}
+
+func validateSampleRequest(req tinkertrain.SampleRequest) error {
+	if req.SamplingSessionID == "" && req.ModelPath == "" && req.BaseModel == "" {
+		return errors.New("missing sampling_session_id, model_path, or base_model")
+	}
+	if req.NumSamples <= 0 {
+		return errors.New("num_samples must be positive")
+	}
+	if req.SamplingParams.MaxTokens <= 0 {
+		return errors.New("max_tokens must be positive")
+	}
+	if tokenCount(req.Prompt) == 0 {
+		return errors.New("prompt is empty")
+	}
+	return nil
 }
 
 func (s *Server) weightsInfo(w http.ResponseWriter, r *http.Request) {
