@@ -44,6 +44,8 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
 - Node report streams update visible node lifecycle and telemetry labels.
 - Node operation start and terminal events update visible active/queued load.
 - Checkpoint TTL metadata is enforced in listings and archive URL requests.
+- Sampling accepts temperature, top-p, top-k, seed, max tokens, and integer stop
+  tokens.
 - `tinker` contains the experimental Go API.
 - The HTTP API enforces the request byte limit advertised in client config.
 
@@ -114,7 +116,8 @@ Goal: support real training resume.
 
 Goal: make sampling responses match hosted behavior where advertised.
 
-- Support temperature, top-p, top-k, seed, max tokens, and integer stop tokens.
+- Keep temperature, top-p, top-k, seed, max tokens, and integer stop tokens
+  covered by deterministic sampler tests.
 - Add tokenizer-backed string stops.
 - Return generated token logprobs.
 - Return prompt logprobs when requested.
