@@ -33,6 +33,8 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
   refreshed inventory.
 - `localtinker-node run` watches coordinator commands and exits on drain
   directives.
+- Watched node commands are acknowledged through the coordinator report stream
+  and surfaced in node labels.
 - `localtinker-node cache delete` removes installed artifacts and can report
   the updated inventory.
 - Artifact transfer reports update visible node transfer state and completed
@@ -129,8 +131,7 @@ Goal: make nodes useful local workers, not just cache/RPC scaffolding.
 - Extend node operation lifecycle events with leased work assignment and
   persisted terminal result handling.
 - Wire artifact retention decisions into leased node commands.
-- Extend node drain and health states with lease-aware draining, command
-  acknowledgement, and recovery.
+- Extend node drain and health states with lease-aware draining and recovery.
 - Test coordinator-node-node artifact sync.
 
 ## 8. Tray and Dashboard
