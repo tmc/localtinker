@@ -350,8 +350,46 @@ func (s *Server) ReportInventory(_ context.Context, req *connect.Request[tinkerv
 	return connect.NewResponse(&tinkerv1.ReportInventoryResponse{}), nil
 }
 
-func (s *Server) ApplyRetention(context.Context, *connect.Request[tinkerv1.ApplyRetentionRequest]) (*connect.Response[tinkerv1.ApplyRetentionResponse], error) {
-	return connect.NewResponse(&tinkerv1.ApplyRetentionResponse{}), nil
+func (s *Server) ApplyRetention(_ context.Context, req *connect.Request[tinkerv1.ApplyRetentionRequest]) (*connect.Response[tinkerv1.ApplyRetentionResponse], error) {
+	nodeID := req.Msg.GetNodeId()
+	if nodeID == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("missing node_id"))
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	node := s.nodes[nodeID]
+	if node == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("unknown node"))
+	}
+	if req.Msg.GetTargetFreeBytes() == 0 {
+		return connect.NewResponse(&tinkerv1.ApplyRetentionResponse{}), nil
+	}
+
+	protected := make(map[string]bool)
+	for _, root := range req.Msg.GetProtectedRootHashes() {
+		if root != "" {
+			protected[root] = true
+		}
+	}
+	roots := make([]string, 0, len(node.artifacts))
+	for root := range node.artifacts {
+		if !protected[root] {
+			roots = append(roots, root)
+		}
+	}
+	sort.Strings(roots)
+
+	resp := &tinkerv1.ApplyRetentionResponse{}
+	for _, root := range roots {
+		if resp.GetBytesDeleted() >= req.Msg.GetTargetFreeBytes() {
+			break
+		}
+		inv := node.artifacts[root]
+		delete(node.artifacts, root)
+		resp.DeletedRootHashes = append(resp.DeletedRootHashes, root)
+		resp.BytesDeleted += inv.GetBytesPresent()
+	}
+	return connect.NewResponse(resp), nil
 }
 
 func (s *Server) ListPeers(_ context.Context, req *connect.Request[tinkerv1.ListPeersRequest]) (*connect.Response[tinkerv1.ListPeersResponse], error) {
