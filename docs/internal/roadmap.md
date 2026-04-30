@@ -25,6 +25,8 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
   request node drain through admin state.
 - The artifact tracker records inventories and applies in-memory retention
   decisions for node-reported artifacts.
+- Coordinator heartbeats return artifact prewarm roots for published manifests
+  missing from a node inventory.
 - Admin RPC exposes run summaries and run inspection payloads from coordinator
   state.
 - Node report streams update visible node lifecycle and telemetry labels.
@@ -115,7 +117,7 @@ Goal: make nodes useful local workers, not just cache/RPC scaffolding.
 - Assign work to nodes through leases.
 - Extend node operation lifecycle events with leased work assignment and
   terminal result handling.
-- Support artifact prewarm and node-side retention execution.
+- Extend artifact prewarm and retention with node-side fetch/delete execution.
 - Extend node drain and health states with lease-aware draining and recovery.
 - Test coordinator-node-node artifact sync.
 
