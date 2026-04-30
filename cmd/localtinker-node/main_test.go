@@ -188,6 +188,7 @@ func TestHandlePrewarmSyncsAndReportsInventory(t *testing.T) {
 
 	coordClient := tinkerv1connect.NewTinkerCoordinatorClient(coordServer.Client(), coordServer.URL)
 	tracker := tinkerv1connect.NewArtifactTrackerClient(coordServer.Client(), coordServer.URL)
+	admin := tinkerv1connect.NewTinkerAdminClient(coordServer.Client(), coordServer.URL)
 	if _, err := tracker.PublishManifest(context.Background(), connect.NewRequest(&tinkerv1.PublishManifestRequest{
 		Manifest: tinkerartifact.ToProto(manifest),
 	})); err != nil {
@@ -241,6 +242,19 @@ func TestHandlePrewarmSyncsAndReportsInventory(t *testing.T) {
 	}
 	if len(peers.Msg.GetPeers()) != 2 {
 		t.Fatalf("peers = %d, want 2", len(peers.Msg.GetPeers()))
+	}
+	nodes, err := admin.ListNodes(context.Background(), connect.NewRequest(&tinkerv1.ListNodesRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var labels map[string]string
+	for _, node := range nodes.Msg.GetNodes() {
+		if node.GetNodeId() == "target" {
+			labels = node.GetLabels()
+		}
+	}
+	if labels["last_transfer_root_hash"] != manifest.RootHash || labels["last_transfer_state"] != "complete" || labels["last_transfer_peer_node_id"] != "source" {
+		t.Fatalf("target labels = %+v", labels)
 	}
 }
 

@@ -360,7 +360,7 @@ func cacheSync(args []string) error {
 		connect.WithSendMaxBytes(rpcMaxBytes),
 	)
 	ctx := context.Background()
-	syncedRoot, err := syncArtifact(ctx, tracker, store, *rootHash)
+	syncedRoot, err := syncArtifact(ctx, tracker, store, *rootHash, *nodeID)
 	if err != nil {
 		return err
 	}
@@ -433,7 +433,7 @@ func handlePrewarm(ctx context.Context, tracker tinkerv1connect.ArtifactTrackerC
 		if root == "" || store.Has(root) {
 			continue
 		}
-		if _, err := syncArtifact(ctx, tracker, store, root); err != nil {
+		if _, err := syncArtifact(ctx, tracker, store, root, nodeID); err != nil {
 			return fmt.Errorf("%s: %w", root, err)
 		}
 		synced = true
@@ -452,7 +452,7 @@ func handlePrewarm(ctx context.Context, tracker tinkerv1connect.ArtifactTrackerC
 	return err
 }
 
-func syncArtifact(ctx context.Context, tracker tinkerv1connect.ArtifactTrackerClient, store *tinkerartifact.Store, rootHashOrAlias string) (string, error) {
+func syncArtifact(ctx context.Context, tracker tinkerv1connect.ArtifactTrackerClient, store *tinkerartifact.Store, rootHashOrAlias, nodeID string) (string, error) {
 	got, err := tracker.GetManifest(ctx, connect.NewRequest(&tinkerv1.GetManifestRequest{RootHashOrAlias: rootHashOrAlias}))
 	if err != nil {
 		return "", err
@@ -466,10 +466,55 @@ func syncArtifact(ctx context.Context, tracker tinkerv1connect.ArtifactTrackerCl
 	for _, peer := range peers.Msg.GetPeers() {
 		urls = append(urls, peer.GetAddress())
 	}
+	peerID := firstPeerID(peers.Msg.GetPeers())
+	if nodeID != "" {
+		if err := reportTransfer(ctx, tracker, nodeID, manifest, peerID, "running", nil); err != nil {
+			return "", err
+		}
+	}
 	if err := tinkernode.SyncArtifact(ctx, store, manifest, urls); err != nil {
+		if nodeID != "" {
+			_ = reportTransfer(ctx, tracker, nodeID, manifest, peerID, "failed", err)
+		}
 		return "", err
 	}
+	if nodeID != "" {
+		if err := reportTransfer(ctx, tracker, nodeID, manifest, peerID, "complete", nil); err != nil {
+			return "", err
+		}
+	}
 	return manifest.RootHash, nil
+}
+
+func reportTransfer(ctx context.Context, tracker tinkerv1connect.ArtifactTrackerClient, nodeID string, manifest tinkerartifact.Manifest, peerID, state string, transferErr error) error {
+	var bytes uint64
+	if manifest.Size > 0 {
+		bytes = uint64(manifest.Size)
+	}
+	req := &tinkerv1.ReportTransferRequest{
+		NodeId:     nodeID,
+		RootHash:   manifest.RootHash,
+		PeerNodeId: peerID,
+		State:      state,
+		Bytes:      bytes,
+	}
+	if transferErr != nil {
+		req.Error = &tinkerv1.ErrorInfo{
+			Code:    "transfer_failed",
+			Message: transferErr.Error(),
+		}
+	}
+	_, err := tracker.ReportTransfer(ctx, connect.NewRequest(req))
+	return err
+}
+
+func firstPeerID(peers []*tinkerv1.PeerInfo) string {
+	for _, peer := range peers {
+		if id := peer.GetNodeId(); id != "" {
+			return id
+		}
+	}
+	return ""
 }
 
 func publishManifest(ctx context.Context, coordinator string, manifest *tinkerv1.Manifest, alias string) error {
