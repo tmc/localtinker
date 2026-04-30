@@ -22,6 +22,12 @@ import (
 
 const RPCMaxBytes = 128 << 20
 
+const (
+	nodeHealthy  = "healthy"
+	nodeDraining = "draining"
+	nodeDrained  = "drained"
+)
+
 type Server struct {
 	coord         *tinkercoord.Coordinator
 	coordinatorID string
@@ -151,7 +157,7 @@ func (s *Server) RegisterNode(_ context.Context, req *connect.Request[tinkerv1.R
 	s.nodes[nodeID] = &nodeState{
 		req:        msg,
 		labels:     cloneMap(msg.GetLabels()),
-		state:      "healthy",
+		state:      nodeHealthy,
 		lastSeenAt: time.Now().UTC(),
 		artifacts:  make(map[string]*tinkerv1.ArtifactInventory),
 	}
@@ -178,7 +184,7 @@ func (s *Server) Heartbeat(_ context.Context, req *connect.Request[tinkerv1.Hear
 	s.mu.Lock()
 	node := s.nodes[nodeID]
 	if node == nil {
-		node = &nodeState{state: "healthy", artifacts: make(map[string]*tinkerv1.ArtifactInventory)}
+		node = &nodeState{state: nodeHealthy, artifacts: make(map[string]*tinkerv1.ArtifactInventory)}
 		s.nodes[nodeID] = node
 	}
 	node.load = msg.GetLoad()
@@ -186,10 +192,15 @@ func (s *Server) Heartbeat(_ context.Context, req *connect.Request[tinkerv1.Hear
 	if len(msg.GetArtifacts()) > 0 {
 		node.artifacts = inventoryMap(msg.GetArtifacts())
 	}
+	drain := node.state == nodeDraining || node.state == nodeDrained
+	if node.state == nodeDraining && msg.GetLoad().GetActiveLeases() == 0 {
+		node.state = nodeDrained
+	}
 	s.mu.Unlock()
 
 	return connect.NewResponse(&tinkerv1.HeartbeatResponse{
-		CoordinatorId: s.coordinatorID,
+		CoordinatorId:  s.coordinatorID,
+		DrainRequested: drain,
 	}), nil
 }
 
@@ -228,7 +239,23 @@ func (s *Server) ListNodes(context.Context, *connect.Request[tinkerv1.ListNodesR
 	return connect.NewResponse(resp), nil
 }
 
-func (s *Server) DrainNode(context.Context, *connect.Request[tinkerv1.DrainNodeRequest]) (*connect.Response[tinkerv1.DrainNodeResponse], error) {
+func (s *Server) DrainNode(_ context.Context, req *connect.Request[tinkerv1.DrainNodeRequest]) (*connect.Response[tinkerv1.DrainNodeResponse], error) {
+	nodeID := req.Msg.GetNodeId()
+	if nodeID == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("missing node_id"))
+	}
+	s.mu.Lock()
+	node := s.nodes[nodeID]
+	if node == nil {
+		s.mu.Unlock()
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("unknown node"))
+	}
+	if node.load != nil && node.load.GetActiveLeases() == 0 {
+		node.state = nodeDrained
+	} else {
+		node.state = nodeDraining
+	}
+	s.mu.Unlock()
 	return connect.NewResponse(&tinkerv1.DrainNodeResponse{}), nil
 }
 
@@ -314,7 +341,7 @@ func (s *Server) ReportInventory(_ context.Context, req *connect.Request[tinkerv
 	s.mu.Lock()
 	node := s.nodes[nodeID]
 	if node == nil {
-		node = &nodeState{state: "healthy", artifacts: make(map[string]*tinkerv1.ArtifactInventory)}
+		node = &nodeState{state: nodeHealthy, artifacts: make(map[string]*tinkerv1.ArtifactInventory)}
 		s.nodes[nodeID] = node
 	}
 	node.artifacts = inventoryMap(req.Msg.GetArtifacts())
