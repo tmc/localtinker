@@ -39,6 +39,8 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
   the updated inventory.
 - Artifact transfer reports update visible node transfer state and completed
   artifact inventory.
+- Node cache sync and prewarm report transfer start, failure, and completion
+  when a node ID is available.
 - Admin RPC exposes run summaries and run inspection payloads from coordinator
   state.
 - Node report streams update visible node lifecycle and telemetry labels.
