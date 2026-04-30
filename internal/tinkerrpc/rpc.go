@@ -271,7 +271,27 @@ func (s *Server) applyNodeEvent(event *tinkerv1.NodeEvent) error {
 			node.labels[k] = v
 		}
 	}
+	switch {
+	case event.GetStarted() != nil:
+		load := nodeLoad(node)
+		load.ActiveLeases++
+		if load.QueuedOperations > 0 {
+			load.QueuedOperations--
+		}
+	case event.GetCompleted() != nil || event.GetFailed() != nil:
+		load := nodeLoad(node)
+		if load.ActiveLeases > 0 {
+			load.ActiveLeases--
+		}
+	}
 	return nil
+}
+
+func nodeLoad(node *nodeState) *tinkerv1.NodeLoad {
+	if node.load == nil {
+		node.load = &tinkerv1.NodeLoad{}
+	}
+	return node.load
 }
 
 func (s *Server) ListNodes(context.Context, *connect.Request[tinkerv1.ListNodesRequest]) (*connect.Response[tinkerv1.ListNodesResponse], error) {
