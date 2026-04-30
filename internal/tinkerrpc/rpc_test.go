@@ -194,6 +194,68 @@ func TestReportLifecycleUpdatesNodeState(t *testing.T) {
 	}
 }
 
+func TestReportOperationEventsUpdateLoad(t *testing.T) {
+	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc, err := New(coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	rpc.Register(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	coordClient := tinkerv1connect.NewTinkerCoordinatorClient(server.Client(), server.URL)
+	adminClient := tinkerv1connect.NewTinkerAdminClient(server.Client(), server.URL)
+
+	if _, err := coordClient.RegisterNode(context.Background(), connect.NewRequest(&tinkerv1.RegisterNodeRequest{
+		NodeId: "node-a",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordClient.Heartbeat(context.Background(), connect.NewRequest(&tinkerv1.HeartbeatRequest{
+		NodeId: "node-a",
+		Load:   &tinkerv1.NodeLoad{QueuedOperations: 1},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	stream := coordClient.Report(context.Background())
+	for _, event := range []*tinkerv1.NodeEvent{
+		{
+			NodeId:  "node-a",
+			Payload: &tinkerv1.NodeEvent_Started{Started: &tinkerv1.OperationStarted{}},
+		},
+		{
+			NodeId:  "node-a",
+			Payload: &tinkerv1.NodeEvent_Completed{Completed: &tinkerv1.OperationCompleted{}},
+		},
+		{
+			NodeId:  "node-a",
+			Payload: &tinkerv1.NodeEvent_Failed{Failed: &tinkerv1.OperationFailed{}},
+		},
+	} {
+		if err := stream.Send(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := stream.CloseAndReceive(); err != nil {
+		t.Fatal(err)
+	}
+
+	nodes, err := adminClient.ListNodes(context.Background(), connect.NewRequest(&tinkerv1.ListNodesRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	load := nodes.Msg.GetNodes()[0].GetLoad()
+	if load.GetActiveLeases() != 0 || load.GetQueuedOperations() != 0 {
+		t.Fatalf("load = %+v", load)
+	}
+}
+
 func TestHeartbeatReturnsPrewarmRoots(t *testing.T) {
 	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
