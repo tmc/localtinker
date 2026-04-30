@@ -212,11 +212,52 @@ func (s *Server) Watch(ctx context.Context, _ *connect.Request[tinkerv1.WatchReq
 
 func (s *Server) Report(_ context.Context, stream *connect.ClientStream[tinkerv1.NodeEvent]) (*connect.Response[tinkerv1.ReportResponse], error) {
 	for stream.Receive() {
+		if err := s.applyNodeEvent(stream.Msg()); err != nil {
+			return nil, err
+		}
 	}
 	if err := stream.Err(); err != nil {
 		return nil, err
 	}
 	return connect.NewResponse(&tinkerv1.ReportResponse{}), nil
+}
+
+func (s *Server) applyNodeEvent(event *tinkerv1.NodeEvent) error {
+	nodeID := event.GetNodeId()
+	if nodeID == "" {
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("missing node_id"))
+	}
+	seen := time.Now().UTC()
+	if unix := event.GetUnixNano(); unix != 0 {
+		seen = time.Unix(0, unix).UTC()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	node := s.nodes[nodeID]
+	if node == nil {
+		node = &nodeState{state: nodeHealthy, artifacts: make(map[string]*tinkerv1.ArtifactInventory)}
+		s.nodes[nodeID] = node
+	}
+	node.lastSeenAt = seen
+	if lifecycle := event.GetLifecycle(); lifecycle != nil && lifecycle.GetEvent() != "" {
+		node.state = lifecycle.GetEvent()
+		for k, v := range lifecycle.GetMetadata() {
+			if node.labels == nil {
+				node.labels = make(map[string]string)
+			}
+			node.labels[k] = v
+		}
+	}
+	if telemetry := event.GetTelemetry(); telemetry != nil {
+		for k, v := range telemetry.GetLabels() {
+			if node.labels == nil {
+				node.labels = make(map[string]string)
+			}
+			node.labels[k] = v
+		}
+	}
+	return nil
 }
 
 func (s *Server) ListNodes(context.Context, *connect.Request[tinkerv1.ListNodesRequest]) (*connect.Response[tinkerv1.ListNodesResponse], error) {
@@ -237,6 +278,9 @@ func (s *Server) ListNodes(context.Context, *connect.Request[tinkerv1.ListNodesR
 			Labels: cloneMap(node.labels),
 		})
 	}
+	sort.Slice(resp.Nodes, func(i, j int) bool {
+		return resp.Nodes[i].GetNodeId() < resp.Nodes[j].GetNodeId()
+	})
 	return connect.NewResponse(resp), nil
 }
 
