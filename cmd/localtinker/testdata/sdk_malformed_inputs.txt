@@ -1,0 +1,64 @@
+python sdk_malformed_inputs.py
+stdout 'SDK_MALFORMED_INPUTS_OK'
+
+-- sdk_malformed_inputs.py --
+import os
+
+import httpx
+from tinker import ServiceClient
+
+
+base_url = os.environ["TINKER_BASE_URL"]
+client = ServiceClient()
+try:
+    def expect_user_error(name, datum, want):
+        req = {
+            "model_id": "model-a",
+            "forward_input": {
+                "loss_fn": "cross_entropy",
+                "data": [datum],
+            },
+        }
+        resp = httpx.post(f"{base_url}/api/v1/forward", json=req, timeout=5)
+        assert resp.status_code == 400, (name, resp.status_code, resp.text)
+        body = resp.json()
+        assert body.get("category") == "user", (name, body)
+        assert want in body.get("error", ""), (name, body)
+
+    def valid_datum():
+        return {
+            "model_input": {
+                "chunks": [{"type": "encoded_text", "tokens": [1, 1, 1, 1]}],
+            },
+            "loss_fn_inputs": {
+                "target_tokens": {"data": [1, 1, 1, 1], "dtype": "int64"},
+            },
+        }
+
+    missing = valid_datum()
+    del missing["loss_fn_inputs"]
+    expect_user_error("missing_loss_inputs", missing, "missing loss_fn_inputs")
+
+    unsupported = valid_datum()
+    unsupported["loss_fn_inputs"]["mask"] = {"data": [1, 1, 1, 1], "dtype": "float32"}
+    expect_user_error("unsupported_loss_input", unsupported, 'unsupported loss_fn_inputs key "mask"')
+
+    sparse = valid_datum()
+    sparse["loss_fn_inputs"]["target_tokens"] = {
+        "data": [1, 1, 1, 1],
+        "dtype": "int64",
+        "sparse_crow_indices": [0, 1],
+    }
+    expect_user_error("sparse_tensor", sparse, "sparse tensors are not supported")
+
+    bad_shape = valid_datum()
+    bad_shape["loss_fn_inputs"]["target_tokens"] = {
+        "data": [1, 1, 1, 1],
+        "dtype": "int64",
+        "shape": [2, 3],
+    }
+    expect_user_error("bad_shape", bad_shape, "shape [2 3] has 6 elements but data has 4")
+
+    print("SDK_MALFORMED_INPUTS_OK")
+finally:
+    client.holder.close()
