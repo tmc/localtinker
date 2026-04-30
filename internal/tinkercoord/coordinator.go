@@ -617,6 +617,16 @@ func (c *Coordinator) DeleteCheckpointMetadata(ctx context.Context, path string)
 	return c.store.DeleteCheckpoint(ctx, path)
 }
 
+// CheckpointExpired reports whether path has checkpoint metadata with an
+// expiration time that has passed.
+func (c *Coordinator) CheckpointExpired(ctx context.Context, path string) (bool, error) {
+	checkpoint, err := c.checkpointMetadata(ctx, path)
+	if err != nil {
+		return false, err
+	}
+	return checkpointExpired(c.now(), checkpoint), nil
+}
+
 func (c *Coordinator) checkpointMetadata(ctx context.Context, path string) (tinkerdb.Checkpoint, error) {
 	checkpoint, err := c.store.GetCheckpoint(ctx, path)
 	if err == nil {
@@ -674,6 +684,9 @@ func (c *Coordinator) checkpointRecords(ctx context.Context) ([]Checkpoint, erro
 		if meta.Owner == "" {
 			meta.Owner = "local"
 		}
+		if checkpointExpired(c.now(), meta) {
+			continue
+		}
 		checkpoints = append(checkpoints, Checkpoint{
 			CheckpointID:   parsed.Kind + "/" + parsed.Name,
 			CheckpointType: typ,
@@ -687,6 +700,10 @@ func (c *Coordinator) checkpointRecords(ctx context.Context) ([]Checkpoint, erro
 		seen[path] = true
 	}
 	return checkpoints, nil
+}
+
+func checkpointExpired(now time.Time, checkpoint tinkerdb.Checkpoint) bool {
+	return checkpoint.ExpiresAt != nil && !checkpoint.ExpiresAt.After(now.UTC())
 }
 
 func (c *Coordinator) AcceptTelemetry(context.Context, json.RawMessage) error {
