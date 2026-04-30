@@ -34,6 +34,7 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
 - Admin RPC exposes run summaries and run inspection payloads from coordinator
   state.
 - Node report streams update visible node lifecycle and telemetry labels.
+- Node operation start and terminal events update visible active/queued load.
 - Checkpoint TTL metadata is enforced in listings and archive URL requests.
 - `tinker` contains the experimental Go API.
 - The HTTP API enforces the request byte limit advertised in client config.
@@ -120,7 +121,7 @@ Goal: make nodes useful local workers, not just cache/RPC scaffolding.
 - Advertise model, memory, disk, and backend capabilities.
 - Assign work to nodes through leases.
 - Extend node operation lifecycle events with leased work assignment and
-  terminal result handling.
+  persisted terminal result handling.
 - Wire artifact retention decisions into leased node commands.
 - Extend node drain and health states with lease-aware draining and recovery.
 - Test coordinator-node-node artifact sync.
