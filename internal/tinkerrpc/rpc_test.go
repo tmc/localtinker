@@ -529,3 +529,57 @@ func TestApplyRetentionUpdatesNodeInventory(t *testing.T) {
 		t.Fatalf("root-b peers = %d, want 1", len(peers.Msg.GetPeers()))
 	}
 }
+
+func TestReportTransferUpdatesNodeInventory(t *testing.T) {
+	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc, err := New(coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	rpc.Register(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	coordClient := tinkerv1connect.NewTinkerCoordinatorClient(server.Client(), server.URL)
+	tracker := tinkerv1connect.NewArtifactTrackerClient(server.Client(), server.URL)
+	adminClient := tinkerv1connect.NewTinkerAdminClient(server.Client(), server.URL)
+
+	if _, err := coordClient.RegisterNode(context.Background(), connect.NewRequest(&tinkerv1.RegisterNodeRequest{
+		NodeId: "node-a",
+		Labels: map[string]string{
+			"artifact_peer_url": "http://127.0.0.1:9000",
+		},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tracker.ReportTransfer(context.Background(), connect.NewRequest(&tinkerv1.ReportTransferRequest{
+		NodeId:     "node-a",
+		RootHash:   "root-a",
+		PeerNodeId: "peer-a",
+		State:      "complete",
+		Bytes:      12,
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	peers, err := tracker.ListPeers(context.Background(), connect.NewRequest(&tinkerv1.ListPeersRequest{RootHash: "root-a"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(peers.Msg.GetPeers()) != 1 {
+		t.Fatalf("peers = %d, want 1", len(peers.Msg.GetPeers()))
+	}
+	nodes, err := adminClient.ListNodes(context.Background(), connect.NewRequest(&tinkerv1.ListNodesRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels := nodes.Msg.GetNodes()[0].GetLabels()
+	if labels["last_transfer_state"] != "complete" || labels["last_transfer_peer_node_id"] != "peer-a" || labels["last_transfer_bytes"] != "12" {
+		t.Fatalf("labels = %#v", labels)
+	}
+}
