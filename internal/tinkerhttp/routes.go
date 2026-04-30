@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -808,7 +809,18 @@ func decodeJSON(r *http.Request, v any) error {
 		}
 		return fmt.Errorf("decode json: %w", err)
 	}
-	return nil
+	var extra json.RawMessage
+	if err := dec.Decode(&extra); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			return fmt.Errorf("request body exceeds %d bytes", maxErr.Limit)
+		}
+		return fmt.Errorf("decode json: %w", err)
+	}
+	return errors.New("decode json: multiple json values")
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
