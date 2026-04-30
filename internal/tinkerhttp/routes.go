@@ -619,7 +619,10 @@ func (s *Server) weightsInfo(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		TinkerPath string `json:"tinker_path"`
 	}
-	_ = decodeJSON(r, &req)
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
 	base := "Qwen/Qwen3-8B"
 	rank := 8
 	if req.TinkerPath != "" {
