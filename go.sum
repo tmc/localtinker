@@ -10,6 +10,14 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
+github.com/tmc/apple v0.5.5 h1:OCa/FgijExw3gA+WU9g6usgDD2XNOPEE23pl1fDVP3o=
+github.com/tmc/apple v0.5.5/go.mod h1:yy3A4tLBZYBCTu5xG52ZdtaAfzpRdTsuH5sXZn3MjSs=
+github.com/tmc/mlx-go v0.0.0-20260430055908-2a38bf0f0098 h1:nYnAH/CBJnwQxOfQALzZlN21LYRo7/jc0XRcAUSOO4Q=
+github.com/tmc/mlx-go v0.0.0-20260430055908-2a38bf0f0098/go.mod h1:lM7En3SYwMNu+4W3PqaOlTy8y06UJqzffl1X9cm8n84=
+github.com/tmc/mlx-go-lm v0.0.0-20260430055726-ce4efcbadf01 h1:IfkTwUvxMgHB0zYY46Cd6SxUQnQv3bqdUsym6LYarZ4=
+github.com/tmc/mlx-go-lm v0.0.0-20260430055726-ce4efcbadf01/go.mod h1:qQtCCjbu1O8atPZEH16nIiCXVX0p2t/LfyoLRP7yQkk=
+github.com/tmc/modelir v0.0.0-20260430035034-7c8a1bc7d1c4 h1:tn1kjh46+th9+MUp1XvnAqSmOY5RIPCxJ0k0MdVOj4Y=
+github.com/tmc/modelir v0.0.0-20260430035034-7c8a1bc7d1c4/go.mod h1:bdPnNrhetB2b0EGmEvjbjhy7R7Ige5nTcZl50KZGhWU=
 golang.org/x/image v0.38.0 h1:5l+q+Y9JDC7mBOMjo4/aPhMDcxEptsX+Tt3GgRQRPuE=
 golang.org/x/image v0.38.0/go.mod h1:/3f6vaXC+6CEanU4KJxbcUZyEePbyKbaLoDOe4ehFYY=
 golang.org/x/tools v0.41.0 h1:a9b8iMweWG+S0OBnlU36rzLp20z1Rp10w+IY2czHTQc=
@@ -18,5 +26,7 @@ google.golang.org/protobuf v1.36.11 h1:fV6ZwhNocDyBLK0dj+fg8ektcVegBBuEolpbTQyBN
 google.golang.org/protobuf v1.36.11/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
+rsc.io/omap v1.2.0 h1:c1M8jchnHbzmJALzGLclfH3xDWXrPxSUHXzH5C+8Kdw=
+rsc.io/omap v1.2.0/go.mod h1:C8pkI0AWexHopQtZX+qiUeJGzvc8HkdgnsWK4/mAa00=
 rsc.io/script v0.0.2 h1:eYoG7A3GFC3z1pRx3A2+s/vZ9LA8cxojHyCvslnj4RI=
 rsc.io/script v0.0.2/go.mod h1:cKBjCtFBBeZ0cbYFRXkRoxP+xGqhArPa9t3VWhtXfzU=
