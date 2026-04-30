@@ -714,6 +714,14 @@ func (s *Server) ReportTransfer(_ context.Context, req *connect.Request[tinkerv1
 	if bytes := msg.GetBytes(); bytes > 0 {
 		node.labels["last_transfer_bytes"] = strconv.FormatUint(bytes, 10)
 	}
+	if info := msg.GetError(); info != nil {
+		if code := info.GetCode(); code != "" {
+			node.labels["last_transfer_error_code"] = code
+		}
+		if message := info.GetMessage(); message != "" {
+			node.labels["last_transfer_error_message"] = message
+		}
+	}
 	if state == "complete" {
 		node.artifacts[root] = &tinkerv1.ArtifactInventory{
 			RootHash:     root,
