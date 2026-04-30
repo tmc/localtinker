@@ -197,12 +197,26 @@ func (s *Server) Heartbeat(_ context.Context, req *connect.Request[tinkerv1.Hear
 	if node.state == nodeDraining && msg.GetLoad().GetActiveLeases() == 0 {
 		node.state = nodeDrained
 	}
+	prewarm := s.prewarmRootsLocked(node)
 	s.mu.Unlock()
 
 	return connect.NewResponse(&tinkerv1.HeartbeatResponse{
 		CoordinatorId:  s.coordinatorID,
 		DrainRequested: drain,
+		PrewarmRoots:   prewarm,
 	}), nil
+}
+
+func (s *Server) prewarmRootsLocked(node *nodeState) []string {
+	var roots []string
+	for root := range s.manifests {
+		inv := node.artifacts[root]
+		if inv == nil || inv.GetState() != "complete" {
+			roots = append(roots, root)
+		}
+	}
+	sort.Strings(roots)
+	return roots
 }
 
 func (s *Server) Watch(ctx context.Context, _ *connect.Request[tinkerv1.WatchRequest], _ *connect.ServerStream[tinkerv1.NodeCommand]) error {

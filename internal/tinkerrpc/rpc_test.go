@@ -194,6 +194,56 @@ func TestReportLifecycleUpdatesNodeState(t *testing.T) {
 	}
 }
 
+func TestHeartbeatReturnsPrewarmRoots(t *testing.T) {
+	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc, err := New(coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	rpc.Register(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	coordClient := tinkerv1connect.NewTinkerCoordinatorClient(server.Client(), server.URL)
+	tracker := tinkerv1connect.NewArtifactTrackerClient(server.Client(), server.URL)
+
+	if _, err := tracker.PublishManifest(context.Background(), connect.NewRequest(&tinkerv1.PublishManifestRequest{
+		Manifest: &tinkerv1.Manifest{RootHash: "root-a", Kind: "model", Storage: "tinker"},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tracker.PublishManifest(context.Background(), connect.NewRequest(&tinkerv1.PublishManifestRequest{
+		Manifest: &tinkerv1.Manifest{RootHash: "root-b", Kind: "model", Storage: "tinker"},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordClient.RegisterNode(context.Background(), connect.NewRequest(&tinkerv1.RegisterNodeRequest{
+		NodeId: "node-a",
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	hb, err := coordClient.Heartbeat(context.Background(), connect.NewRequest(&tinkerv1.HeartbeatRequest{
+		NodeId: "node-a",
+		Artifacts: []*tinkerv1.ArtifactInventory{{
+			RootHash: "root-b",
+			State:    "complete",
+		}},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := hb.Msg.GetPrewarmRoots()
+	if len(got) != 1 || got[0] != "root-a" {
+		t.Fatalf("prewarm roots = %v, want [root-a]", got)
+	}
+}
+
 func TestAdminRunRoutes(t *testing.T) {
 	ctx := context.Background()
 	store := tinkerdb.OpenMemory()
