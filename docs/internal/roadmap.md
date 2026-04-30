@@ -31,6 +31,8 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
   missing from a node inventory.
 - `localtinker-node run` prewarms missing artifacts from peers and reports the
   refreshed inventory.
+- `localtinker-node run` watches coordinator commands and exits on drain
+  directives.
 - `localtinker-node cache delete` removes installed artifacts and can report
   the updated inventory.
 - Artifact transfer reports update visible node transfer state and completed
