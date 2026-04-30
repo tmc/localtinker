@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package mlxgo.tinker.v1;
+
+option go_package = "github.com/tmc/mlx-go/internal/tinkerproto/tinkerv1";
+
+import "mlxgo/tinker/v1/common.proto";
+import "mlxgo/tinker/v1/coordinator.proto";
+
+service TinkerAdmin {
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+  rpc DrainNode(DrainNodeRequest) returns (DrainNodeResponse);
+  rpc ListRuns(ListRunsRequest) returns (ListRunsResponse);
+  rpc InspectRun(InspectRunRequest) returns (InspectRunResponse);
+  rpc ListArtifacts(ListArtifactsRequest) returns (ListArtifactsResponse);
+}
+
+message ListNodesRequest {}
+
+message ListNodesResponse {
+  repeated NodeSummary nodes = 1;
+}
+
+message NodeSummary {
+  string node_id = 1;
+  string name = 2;
+  string state = 3;
+  NodeLoad load = 4;
+  map<string, string> labels = 5;
+}
+
+message DrainNodeRequest {
+  string node_id = 1;
+  string reason = 2;
+}
+
+message DrainNodeResponse {}
+
+message ListRunsRequest {}
+
+message ListRunsResponse {
+  repeated RunSummary runs = 1;
+}
+
+message RunSummary {
+  string run_id = 1;
+  string name = 2;
+  string algorithm = 3;
+  string state = 4;
+  string current_checkpoint = 5;
+}
+
+message InspectRunRequest {
+  string run_id = 1;
+}
+
+message InspectRunResponse {
+  bytes run_json = 1;
+  repeated bytes events_json = 2;
+}
+
+message ListArtifactsRequest {}
+
+message ListArtifactsResponse {
+  repeated ArtifactRef artifacts = 1;
+}

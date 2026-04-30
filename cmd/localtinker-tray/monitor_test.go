@@ -1,0 +1,59 @@
+package main
+
+import (
+	"errors"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestSnapshotTitle(t *testing.T) {
+	tests := []struct {
+		name   string
+		s      snapshot
+		nodeID string
+		want   string
+	}{
+		{name: "error", s: snapshot{Err: errors.New("down")}, want: "T!"},
+		{name: "empty", s: snapshot{}, want: "T0"},
+		{name: "nodes", s: snapshot{Nodes: []nodeInfo{{ID: "a"}, {ID: "b"}}}, want: "T2"},
+		{name: "active leases", s: snapshot{Nodes: []nodeInfo{{ID: "a", ActiveLeases: 2}, {ID: "b", ActiveLeases: 3}}}, want: "T5"},
+		{name: "named node", nodeID: "a", s: snapshot{Nodes: []nodeInfo{{ID: "a", ActiveLeases: 4}}}, want: "T4"},
+		{name: "missing node", nodeID: "a", s: snapshot{Nodes: []nodeInfo{{ID: "b"}}}, want: "T?"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.s.title(tt.nodeID); got != tt.want {
+				t.Fatalf("title() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSnapshotMenuLines(t *testing.T) {
+	s := snapshot{
+		Coordinator: "http://127.0.0.1:8080",
+		CheckedAt:   time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC),
+		Nodes: []nodeInfo{{
+			ID:           "node-a",
+			Name:         "mac-studio",
+			State:        "ready",
+			ActiveLeases: 1,
+			QueuedOps:    2,
+			MemoryBytes:  64 << 30,
+			Temperature:  48.5,
+		}},
+		Artifacts: []artifactInfo{{Alias: "qwen", Kind: "model", Storage: "hf-cache"}},
+	}
+	got := strings.Join(s.menuLines(""), "\n")
+	for _, want := range []string{
+		"Coordinator: http://127.0.0.1:8080",
+		"mac-studio ready leases=1 queue=2 mem=64.0GB temp=48.5C",
+		"Artifacts: 1",
+		"qwen model hf-cache",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("menuLines missing %q in:\n%s", want, got)
+		}
+	}
+}

@@ -1,0 +1,161 @@
+# localtinker Roadmap
+
+localtinker is a local Tinker-compatible coordinator and node runtime backed by
+MLX. This file tracks the work needed to make it dependable for local training
+and close enough to hosted Tinker that ordinary SDK workflows behave the same.
+
+## Principles
+
+- Keep public request handling typed and explicit.
+- Reject malformed user input before it reaches MLX.
+- Keep coordinator, node, artifact, and training concerns separate.
+- Prefer small Go APIs with ordinary structs and errors.
+- Prove compatibility with SDK-level tests.
+
+## Current Shape
+
+- `cmd/localtinker` serves the Python SDK HTTP API, Connect RPC API, and
+  dashboard.
+- `cmd/localtinker-node` provides node and artifact cache tooling.
+- `cmd/localtinker-tray` provides the macOS menu bar monitor.
+- `internal/tinkertrain` runs local MLX LoRA training and sampling.
+- `internal/tinkerartifact`, `internal/tinkernode`, and `internal/tinkerproto`
+  provide the node/cache substrate.
+- `tinker` contains the experimental Go API.
+
+## 1. SDK Conformance
+
+Goal: make the Python SDK see localtinker as a normal Tinker endpoint for the
+supported surface.
+
+- Add a conformance suite driven by the upstream Python SDK.
+- Cover session creation, heartbeat, futures, model creation, `forward`,
+  `forward_backward`, `optim_step`, save/load weights, sampler sessions,
+  sampling, run listing, checkpoint listing, archive URL, publish, unpublish,
+  TTL, and delete.
+- Match hosted error response shapes and categories.
+- Keep unsupported capabilities explicit in server capabilities.
+- Add malformed `loss_fn_inputs` fixtures.
+
+## 2. Cross-Entropy Contract
+
+Goal: implement the real `cross_entropy` tensor contract instead of relying on
+the current shifted-token shortcut.
+
+- Infer a 1D shape for flattened `TensorData` when `shape` is omitted.
+- Accept rectangular dense target tensors.
+- Reject ragged tensors and shape/data mismatches at the HTTP boundary.
+- Support target tensors that are not just `model_input` shifted left by one.
+- Support arbitrary valid float weights.
+- Validate target/weight shape compatibility.
+- Return real per-token logprobs where the SDK expects them.
+
+## 3. Futures and Scheduling
+
+Goal: replace mostly synchronous execution with a real coordinator scheduler.
+
+- Add an operation queue with queued, running, complete, user_error,
+  system_error, and canceled states.
+- Add bounded concurrency and request byte accounting.
+- Add cancellation and lease timeout handling.
+- Persist enough operation metadata to survive coordinator restarts.
+- Match hosted `retrieve_future(..., allow_metadata_only=True)` behavior.
+- Expose queue state in RPC and dashboard views.
+
+## 4. Checkpoints and Artifacts
+
+Goal: make checkpoints useful for both SDK workflows and node sync.
+
+- Store adapter weights, adapter config, optimizer state, and completion markers
+  in a stable checkpoint layout.
+- Produce real tar archives for checkpoint downloads.
+- Return archive URLs consumable by the Tinker CLI.
+- Track size, visibility, expiration, and owner metadata.
+- Implement publish, unpublish, TTL, and delete as stateful operations.
+- Keep training checkpoints and sampler checkpoints distinct.
+- Test download, extraction, load, and sampler creation end to end.
+
+## 5. Optimizer State
+
+Goal: support real training resume.
+
+- Save optimizer state alongside LoRA weights.
+- Load optimizer state for `load_state_with_optimizer`.
+- Track optimizer step counters.
+- Test train, save, load, resume, and continued loss decrease.
+- Document determinism inputs: seed, model, adapter config, optimizer, data
+  order, and MLX backend.
+
+## 6. Sampling
+
+Goal: make sampling responses match hosted behavior where advertised.
+
+- Support temperature, top-p, top-k, seed, max tokens, and integer stop tokens.
+- Add tokenizer-backed string stops.
+- Return generated token logprobs.
+- Return prompt logprobs when requested.
+- Add top-k prompt logprobs only when implemented and advertised.
+- Add deterministic sampler tests over a small cached model.
+
+## 7. Node Runtime
+
+Goal: make nodes useful local workers, not just cache/RPC scaffolding.
+
+- Add coordinator registration and heartbeat loops.
+- Advertise model, memory, disk, and backend capabilities.
+- Assign work to nodes through leases.
+- Stream node operation lifecycle events.
+- Support artifact prewarm and retention.
+- Add node drain and health states.
+- Test coordinator-node-node artifact sync.
+
+## 8. Tray and Dashboard
+
+Goal: make local operation visible without tailing logs.
+
+- Show coordinator health, active runs, queued operations, node health, and
+  recent errors.
+- Link tray actions to dashboard pages.
+- Show local checkpoint paths and archive availability.
+- Keep tray polling cheap and robust when the coordinator is down.
+- Add dashboard pages for runs, checkpoints, nodes, and artifacts.
+
+## 9. Packaging
+
+Goal: keep the project buildable from a clean checkout.
+
+- Keep `go test ./...` passing with `GOWORK=off`.
+- Add release build commands for coordinator, node, and tray.
+- Document model cache, Python SDK, and credential setup.
+- Avoid checking in binaries, generated caches, downloaded weights, or secrets.
+
+## 10. Hosted Comparison
+
+Goal: keep local behavior honest against hosted Tinker.
+
+- Run a short hosted training job and record run ID, futures, losses, and
+  checkpoint path.
+- Run the same SDK script against localtinker.
+- Compare response shapes, metric names, checkpoint metadata, and sampler
+  behavior.
+- Track differences in a conformance report.
+
+## Known Gaps
+
+- No true async scheduler or backpressure yet.
+- `cross_entropy` still uses a shifted-token MLX training path.
+- Arbitrary non-prefix fractional weights are not fully supported.
+- Prompt logprobs and top-k prompt logprobs are not implemented.
+- String stops need tokenizer-backed sampling.
+- Optimizer state is not persisted.
+- Checkpoint archive URLs are compatibility shims, not full archive workflows.
+- Publish, unpublish, and TTL are compatibility shims.
+- Hosted numerics and local MLX numerics will differ.
+
+## Next Milestones
+
+1. Add SDK conformance tests for all currently supported routes.
+2. Replace shifted-token-only loss handling with dense CE tensors.
+3. Implement real checkpoint archives with completion markers.
+4. Add operation queue state and asynchronous futures.
+5. Add tokenizer-backed string stops and generated-token logprobs.

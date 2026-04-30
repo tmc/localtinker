@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package mlxgo.tinker.v1;
+
+option go_package = "github.com/tmc/mlx-go/internal/tinkerproto/tinkerv1";
+
+import "mlxgo/tinker/v1/common.proto";
+import "mlxgo/tinker/v1/coordinator.proto";
+
+service TinkerNode {
+  rpc Run(NodeCommand) returns (OperationResult);
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+  rpc Drain(DrainRequest) returns (DrainResponse);
+  rpc Health(NodeHealthRequest) returns (NodeHealthResponse);
+}
+
+message CancelRequest {
+  string lease_id = 1;
+  string operation_id = 2;
+}
+
+message CancelResponse {
+  bool canceled = 1;
+}
+
+message DrainRequest {
+  string node_id = 1;
+  string reason = 2;
+  bool checkpoint = 3;
+}
+
+message DrainResponse {
+  repeated string checkpoint_paths = 1;
+}
+
+message NodeHealthRequest {}
+
+message NodeHealthResponse {
+  string node_id = 1;
+  string state = 2;
+  NodeLoad load = 3;
+}

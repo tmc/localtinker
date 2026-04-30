@@ -1,0 +1,152 @@
+syntax = "proto3";
+
+package mlxgo.tinker.v1;
+
+option go_package = "github.com/tmc/mlx-go/internal/tinkerproto/tinkerv1";
+
+import "mlxgo/tinker/v1/common.proto";
+import "mlxgo/tinker/v1/coordinator.proto";
+
+service ArtifactTracker {
+  rpc PublishManifest(PublishManifestRequest) returns (PublishManifestResponse);
+  rpc GetManifest(GetManifestRequest) returns (GetManifestResponse);
+  rpc DeleteAlias(DeleteAliasRequest) returns (DeleteAliasResponse);
+  rpc ReportInventory(ReportInventoryRequest) returns (ReportInventoryResponse);
+  rpc ApplyRetention(ApplyRetentionRequest) returns (ApplyRetentionResponse);
+  rpc ListPeers(ListPeersRequest) returns (ListPeersResponse);
+  rpc SignalPeer(stream SignalMessage) returns (stream SignalMessage);
+  rpc ReportTransfer(ReportTransferRequest) returns (ReportTransferResponse);
+}
+
+service ArtifactPeer {
+  rpc Have(HaveRequest) returns (HaveResponse);
+  rpc FetchChunk(FetchChunkRequest) returns (stream ChunkFrame);
+}
+
+message Manifest {
+  string id = 1;
+  string kind = 2;
+  string storage = 3;
+  string name = 4;
+  string version = 5;
+  string root_hash = 6;
+  int64 chunk_size = 7;
+  repeated ManifestFile files = 8;
+  map<string, string> metadata = 9;
+}
+
+message ManifestFile {
+  string path = 1;
+  int64 size = 2;
+  uint32 mode = 3;
+  string sha256 = 4;
+  string blob_id = 5;
+  repeated ChunkRef chunks = 6;
+}
+
+message ChunkRef {
+  int64 index = 1;
+  int64 offset = 2;
+  int64 size = 3;
+  string sha256 = 4;
+}
+
+message PublishManifestRequest {
+  Manifest manifest = 1;
+  string alias = 2;
+}
+
+message PublishManifestResponse {
+  string root_hash = 1;
+}
+
+message GetManifestRequest {
+  string root_hash_or_alias = 1;
+}
+
+message GetManifestResponse {
+  Manifest manifest = 1;
+}
+
+message DeleteAliasRequest {
+  string alias = 1;
+  string reason = 2;
+}
+
+message DeleteAliasResponse {}
+
+message ReportInventoryRequest {
+  string node_id = 1;
+  repeated ArtifactInventory artifacts = 2;
+}
+
+message ReportInventoryResponse {}
+
+message ApplyRetentionRequest {
+  string node_id = 1;
+  repeated string protected_root_hashes = 2;
+  uint64 target_free_bytes = 3;
+}
+
+message ApplyRetentionResponse {
+  repeated string deleted_root_hashes = 1;
+  uint64 bytes_deleted = 2;
+}
+
+message ListPeersRequest {
+  string root_hash = 1;
+  repeated string preferred_labels = 2;
+}
+
+message ListPeersResponse {
+  repeated PeerInfo peers = 1;
+}
+
+message PeerInfo {
+  string node_id = 1;
+  string address = 2;
+  repeated string transports = 3;
+  map<string, string> labels = 4;
+}
+
+message SignalMessage {
+  string transfer_id = 1;
+  string source_node_id = 2;
+  string destination_node_id = 3;
+  string root_hash = 4;
+  string kind = 5;
+  bytes payload = 6;
+}
+
+message ReportTransferRequest {
+  string node_id = 1;
+  string root_hash = 2;
+  string peer_node_id = 3;
+  string state = 4;
+  uint64 bytes = 5;
+  ErrorInfo error = 6;
+}
+
+message ReportTransferResponse {}
+
+message HaveRequest {
+  string root_hash = 1;
+}
+
+message HaveResponse {
+  repeated string chunk_hashes = 1;
+}
+
+message FetchChunkRequest {
+  string root_hash = 1;
+  string chunk_hash = 2;
+  string transfer_token = 3;
+}
+
+message ChunkFrame {
+  string root_hash = 1;
+  string chunk_hash = 2;
+  int64 offset = 3;
+  int64 total_size = 4;
+  bytes data = 5;
+}
