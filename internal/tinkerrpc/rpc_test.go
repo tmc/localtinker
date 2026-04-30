@@ -418,6 +418,113 @@ func TestHeartbeatReturnsPrewarmRoots(t *testing.T) {
 	}
 }
 
+func TestHeartbeatBalancesPrewarmRootsAcrossNodes(t *testing.T) {
+	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc, err := New(coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	rpc.Register(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	coordClient := tinkerv1connect.NewTinkerCoordinatorClient(server.Client(), server.URL)
+	tracker := tinkerv1connect.NewArtifactTrackerClient(server.Client(), server.URL)
+
+	for _, root := range []string{"root-a", "root-b"} {
+		if _, err := tracker.PublishManifest(context.Background(), connect.NewRequest(&tinkerv1.PublishManifestRequest{
+			Manifest: &tinkerv1.Manifest{RootHash: root, Kind: "model", Storage: "tinker"},
+		})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, nodeID := range []string{"node-a", "node-b"} {
+		if _, err := coordClient.RegisterNode(context.Background(), connect.NewRequest(&tinkerv1.RegisterNodeRequest{
+			NodeId: nodeID,
+		})); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	hbA, err := coordClient.Heartbeat(context.Background(), connect.NewRequest(&tinkerv1.HeartbeatRequest{
+		NodeId: "node-a",
+		Load:   &tinkerv1.NodeLoad{MemoryAvailableBytes: 8},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hbB, err := coordClient.Heartbeat(context.Background(), connect.NewRequest(&tinkerv1.HeartbeatRequest{
+		NodeId: "node-b",
+		Load:   &tinkerv1.NodeLoad{MemoryAvailableBytes: 8},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotA := hbA.Msg.GetPrewarmRoots()
+	gotB := hbB.Msg.GetPrewarmRoots()
+	if len(gotA) != 1 || len(gotB) != 1 || gotA[0] == gotB[0] {
+		t.Fatalf("prewarm roots: node-a=%v node-b=%v, want split roots", gotA, gotB)
+	}
+}
+
+func TestHeartbeatAssignsPrewarmToLessLoadedNode(t *testing.T) {
+	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc, err := New(coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	rpc.Register(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	coordClient := tinkerv1connect.NewTinkerCoordinatorClient(server.Client(), server.URL)
+	tracker := tinkerv1connect.NewArtifactTrackerClient(server.Client(), server.URL)
+
+	if _, err := tracker.PublishManifest(context.Background(), connect.NewRequest(&tinkerv1.PublishManifestRequest{
+		Manifest: &tinkerv1.Manifest{RootHash: "root-a", Kind: "model", Storage: "tinker"},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	for _, nodeID := range []string{"node-a", "node-b"} {
+		if _, err := coordClient.RegisterNode(context.Background(), connect.NewRequest(&tinkerv1.RegisterNodeRequest{
+			NodeId: nodeID,
+		})); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	hbA, err := coordClient.Heartbeat(context.Background(), connect.NewRequest(&tinkerv1.HeartbeatRequest{
+		NodeId: "node-a",
+		Load:   &tinkerv1.NodeLoad{ActiveLeases: 2},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hbA.Msg.GetPrewarmRoots(); len(got) != 0 {
+		t.Fatalf("node-a prewarm roots = %v, want none", got)
+	}
+	hbB, err := coordClient.Heartbeat(context.Background(), connect.NewRequest(&tinkerv1.HeartbeatRequest{
+		NodeId: "node-b",
+		Load:   &tinkerv1.NodeLoad{},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hbB.Msg.GetPrewarmRoots(); len(got) != 1 || got[0] != "root-a" {
+		t.Fatalf("node-b prewarm roots = %v, want [root-a]", got)
+	}
+}
+
 func TestAdminRunRoutes(t *testing.T) {
 	ctx := context.Background()
 	store := tinkerdb.OpenMemory()
