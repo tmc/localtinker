@@ -21,6 +21,8 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
 - `internal/tinkertrain` runs local MLX LoRA training and sampling.
 - `internal/tinkerartifact`, `internal/tinkernode`, and `internal/tinkerproto`
   provide the node/cache substrate.
+- The Connect RPC surface accepts node registration and heartbeats and can
+  request node drain through admin state.
 - `tinker` contains the experimental Go API.
 - The HTTP API enforces the request byte limit advertised in client config.
 
@@ -107,7 +109,7 @@ Goal: make nodes useful local workers, not just cache/RPC scaffolding.
 - Assign work to nodes through leases.
 - Stream node operation lifecycle events.
 - Support artifact prewarm and retention.
-- Add node drain and health states.
+- Extend node drain and health states with lease-aware draining and recovery.
 - Test coordinator-node-node artifact sync.
 
 ## 8. Tray and Dashboard
