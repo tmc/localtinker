@@ -109,7 +109,7 @@ func runNode(args []string) error {
 	nodeID := reg.Msg.GetAssignedNodeId()
 	log.Printf("registered node %s with coordinator %s", nodeID, reg.Msg.GetCoordinatorId())
 	if artifacts, err := artifactInventory(store); err == nil {
-		_, err = client.Heartbeat(ctx, connect.NewRequest(&tinkerv1.HeartbeatRequest{
+		resp, err := client.Heartbeat(ctx, connect.NewRequest(&tinkerv1.HeartbeatRequest{
 			NodeId:   nodeID,
 			UnixNano: time.Now().UnixNano(),
 			Load: &tinkerv1.NodeLoad{
@@ -121,6 +121,9 @@ func runNode(args []string) error {
 		}))
 		if err != nil {
 			log.Printf("initial heartbeat: %v", err)
+		} else if resp.Msg.GetDrainRequested() {
+			log.Printf("drain requested")
+			return nil
 		}
 	} else {
 		log.Printf("artifact inventory: %v", err)
@@ -137,7 +140,7 @@ func runNode(args []string) error {
 			if err != nil {
 				log.Printf("artifact inventory: %v", err)
 			}
-			_, err = client.Heartbeat(ctx, connect.NewRequest(&tinkerv1.HeartbeatRequest{
+			resp, err := client.Heartbeat(ctx, connect.NewRequest(&tinkerv1.HeartbeatRequest{
 				NodeId:   nodeID,
 				UnixNano: time.Now().UnixNano(),
 				Load: &tinkerv1.NodeLoad{
@@ -152,6 +155,11 @@ func runNode(args []string) error {
 					return nil
 				}
 				log.Printf("heartbeat: %v", err)
+				continue
+			}
+			if resp.Msg.GetDrainRequested() {
+				log.Printf("drain requested")
+				return nil
 			}
 		}
 	}

@@ -67,6 +67,71 @@ func TestRegisterNodeAndListNodes(t *testing.T) {
 	}
 }
 
+func TestDrainNodeRequestsDrainOnHeartbeat(t *testing.T) {
+	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc, err := New(coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	rpc.Register(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	coordClient := tinkerv1connect.NewTinkerCoordinatorClient(server.Client(), server.URL)
+	adminClient := tinkerv1connect.NewTinkerAdminClient(server.Client(), server.URL)
+
+	if _, err := coordClient.RegisterNode(context.Background(), connect.NewRequest(&tinkerv1.RegisterNodeRequest{
+		NodeId: "node-a",
+		Name:   "Node A",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordClient.Heartbeat(context.Background(), connect.NewRequest(&tinkerv1.HeartbeatRequest{
+		NodeId: "node-a",
+		Load:   &tinkerv1.NodeLoad{ActiveLeases: 1},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adminClient.DrainNode(context.Background(), connect.NewRequest(&tinkerv1.DrainNodeRequest{
+		NodeId: "node-a",
+		Reason: "test",
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	nodes, err := adminClient.ListNodes(context.Background(), connect.NewRequest(&tinkerv1.ListNodesRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := nodes.Msg.GetNodes()[0].GetState(); got != "draining" {
+		t.Fatalf("state = %q, want draining", got)
+	}
+
+	hb, err := coordClient.Heartbeat(context.Background(), connect.NewRequest(&tinkerv1.HeartbeatRequest{
+		NodeId: "node-a",
+		Load:   &tinkerv1.NodeLoad{ActiveLeases: 0},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hb.Msg.GetDrainRequested() {
+		t.Fatal("drain_requested = false, want true")
+	}
+
+	nodes, err = adminClient.ListNodes(context.Background(), connect.NewRequest(&tinkerv1.ListNodesRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := nodes.Msg.GetNodes()[0].GetState(); got != "drained" {
+		t.Fatalf("state = %q, want drained", got)
+	}
+}
+
 func TestArtifactTrackerManifestInventoryAndPeers(t *testing.T) {
 	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
