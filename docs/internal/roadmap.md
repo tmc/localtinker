@@ -27,6 +27,7 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
   decisions for node-reported artifacts.
 - Admin RPC exposes run summaries and run inspection payloads from coordinator
   state.
+- Node report streams update visible node lifecycle and telemetry labels.
 - `tinker` contains the experimental Go API.
 - The HTTP API enforces the request byte limit advertised in client config.
 
@@ -111,7 +112,8 @@ Goal: make nodes useful local workers, not just cache/RPC scaffolding.
 - Add coordinator registration and heartbeat loops.
 - Advertise model, memory, disk, and backend capabilities.
 - Assign work to nodes through leases.
-- Stream node operation lifecycle events.
+- Extend node operation lifecycle events with leased work assignment and
+  terminal result handling.
 - Support artifact prewarm and node-side retention execution.
 - Extend node drain and health states with lease-aware draining and recovery.
 - Test coordinator-node-node artifact sync.
