@@ -31,6 +31,8 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
   refreshed inventory.
 - `localtinker-node cache delete` removes installed artifacts and can report
   the updated inventory.
+- Artifact transfer reports update visible node transfer state and completed
+  artifact inventory.
 - Admin RPC exposes run summaries and run inspection payloads from coordinator
   state.
 - Node report streams update visible node lifecycle and telemetry labels.
