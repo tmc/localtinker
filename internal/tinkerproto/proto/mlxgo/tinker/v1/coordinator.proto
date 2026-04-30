@@ -1,0 +1,196 @@
+syntax = "proto3";
+
+package mlxgo.tinker.v1;
+
+option go_package = "github.com/tmc/mlx-go/internal/tinkerproto/tinkerv1";
+
+import "mlxgo/tinker/v1/common.proto";
+
+service TinkerCoordinator {
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc Watch(WatchRequest) returns (stream NodeCommand);
+  rpc Report(stream NodeEvent) returns (ReportResponse);
+}
+
+message RegisterNodeRequest {
+  string node_id = 1;
+  string name = 2;
+  string hostname = 3;
+  string version = 4;
+  string trust_tier = 5;
+  NodeCapabilities capabilities = 6;
+  map<string, string> labels = 7;
+}
+
+message RegisterNodeResponse {
+  string coordinator_id = 1;
+  string assigned_node_id = 2;
+  int64 heartbeat_interval_ms = 3;
+  int64 lease_timeout_ms = 4;
+  map<string, string> config = 5;
+}
+
+message HeartbeatRequest {
+  string node_id = 1;
+  int64 unix_nano = 2;
+  NodeLoad load = 3;
+  repeated ArtifactInventory artifacts = 4;
+}
+
+message HeartbeatResponse {
+  string coordinator_id = 1;
+  bool drain_requested = 2;
+  repeated string prewarm_roots = 3;
+}
+
+message WatchRequest {
+  string node_id = 1;
+  string coordinator_id = 2;
+}
+
+message NodeCommand {
+  string command_id = 1;
+  string lease_id = 2;
+  string operation_id = 3;
+  string kind = 4;
+  int64 seq_id = 5;
+  int64 deadline_unix_nano = 6;
+  bytes payload_json = 7;
+  ModelRef model = 8;
+
+  oneof directive {
+    RunOperation run = 20;
+    DrainLease drain = 21;
+    RevokeLease revoke = 22;
+    AcknowledgeOperation ack_operation = 23;
+    ApplyArtifactRetention artifact_retention = 24;
+    DeleteArtifact delete_artifact = 25;
+  }
+}
+
+message RunOperation {}
+
+message DrainLease {
+  string reason = 1;
+  bool checkpoint = 2;
+}
+
+message RevokeLease {
+  string reason = 1;
+}
+
+message AcknowledgeOperation {
+  repeated string operation_ids = 1;
+}
+
+message ApplyArtifactRetention {
+  repeated string protected_root_hashes = 1;
+  uint64 target_free_bytes = 2;
+  string reason = 3;
+}
+
+message DeleteArtifact {
+  repeated string root_hashes = 1;
+  string reason = 2;
+}
+
+message NodeEvent {
+  string node_id = 1;
+  string command_id = 2;
+  string lease_id = 3;
+  string operation_id = 4;
+  string kind = 5;
+  int64 unix_nano = 6;
+
+  oneof payload {
+    CommandAck ack = 10;
+    OperationStarted started = 11;
+    OperationCompleted completed = 12;
+    OperationFailed failed = 13;
+    NodeTelemetry telemetry = 14;
+    LifecycleEvent lifecycle = 15;
+  }
+}
+
+message ReportResponse {}
+
+message CommandAck {}
+
+message OperationStarted {}
+
+message OperationCompleted {
+  OperationResult result = 1;
+}
+
+message OperationFailed {
+  ErrorInfo error = 1;
+}
+
+message LifecycleEvent {
+  string event = 1;
+  map<string, string> metadata = 2;
+}
+
+message NodeCapabilities {
+  repeated Backend backends = 1;
+  MemoryInfo memory = 2;
+  DiskInfo disk = 3;
+  repeated NodeModel models = 4;
+  int32 max_concurrency = 5;
+  NodeFeatures features = 6;
+}
+
+message Backend {
+  string name = 1;
+  string device = 2;
+  bool unified_memory = 3;
+}
+
+message MemoryInfo {
+  uint64 total_bytes = 1;
+  uint64 available_bytes = 2;
+}
+
+message DiskInfo {
+  uint64 root_bytes = 1;
+  uint64 available_bytes = 2;
+}
+
+message NodeModel {
+  string name = 1;
+  string root_hash = 2;
+  string tokenizer_id = 3;
+  int32 max_context = 4;
+  string dtype = 5;
+  string quant = 6;
+  bool can_train = 7;
+  bool can_sample = 8;
+}
+
+message NodeFeatures {
+  bool lora = 1;
+  bool optimizer_state = 2;
+  bool sampling = 3;
+  bool top_k_prompt_logprobs = 4;
+  bool custom_loss_arrays = 5;
+  bool interpretability = 6;
+}
+
+message NodeLoad {
+  int32 active_leases = 1;
+  int32 queued_operations = 2;
+  uint64 memory_available_bytes = 3;
+  double temperature_celsius = 4;
+}
+
+message ArtifactInventory {
+  string root_hash = 1;
+  string state = 2;
+  uint64 bytes_present = 3;
+}
+
+message NodeTelemetry {
+  map<string, double> metrics = 1;
+  map<string, string> labels = 2;
+}

@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package mlxgo.tinker.v1;
+
+option go_package = "github.com/tmc/mlx-go/internal/tinkerproto/tinkerv1";
+
+message ArtifactRef {
+  string root_hash = 1;
+  string kind = 2;
+  string storage = 3;
+  string alias = 4;
+}
+
+message ModelRef {
+  string model_id = 1;
+  string root_hash = 2;
+  string tokenizer_id = 3;
+  string repo_id = 4;
+  string repo_type = 5;
+  string commit_hash = 6;
+}
+
+message NodeLabels {
+  map<string, string> values = 1;
+}
+
+message ErrorInfo {
+  string code = 1;
+  string message = 2;
+  bool retryable = 3;
+  map<string, string> metadata = 4;
+}
+
+message TensorData {
+  string dtype = 1;
+  repeated int64 shape = 2;
+  bytes raw = 3;
+}
+
+message OperationResult {
+  string operation_id = 1;
+  string kind = 2;
+  bytes payload_json = 3;
+  ErrorInfo error = 4;
+}

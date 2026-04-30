@@ -1,0 +1,74 @@
+python sdk_smoke.py
+stdout 'SDK_SMOKE_OK'
+
+-- sdk_smoke.py --
+import tinker
+from tinker import ServiceClient
+
+
+client = ServiceClient()
+try:
+    caps = client.get_server_capabilities()
+    assert caps.supported_models, caps
+
+    training = client.create_lora_training_client(
+        base_model="Qwen/Qwen3-8B",
+        rank=8,
+    )
+    info = training.get_info()
+    assert info.model_id, info
+    assert info.model_data.tokenizer_id == "Qwen/Qwen3-8B", info
+
+    data = [
+        tinker.Datum(
+            model_input=tinker.ModelInput.from_ints([1, 1, 1, 1]),
+            loss_fn_inputs={"target_tokens": [1, 1, 1, 1]},
+        )
+    ]
+    before = training.forward(data, "cross_entropy").result(timeout=120).metrics["loss:mean"]
+    backend_seen = False
+    for _ in range(4):
+        training.forward_backward(data, "cross_entropy").result(timeout=120)
+        step = training.optim_step(tinker.AdamParams(learning_rate=1e-4)).result(timeout=120)
+        backend_seen = backend_seen or step.metrics.get("optimizer_backend:mlx") == 1
+    after = training.forward(data, "cross_entropy").result(timeout=120).metrics["loss:mean"]
+    assert after < before, (before, after)
+    assert backend_seen, "MLX optimizer backend was not reported"
+
+    saved = training.save_state("sdk-smoke").result(timeout=120)
+    assert saved.path.startswith("tinker://"), saved
+    loaded = training.load_state(saved.path).result(timeout=120)
+    assert loaded.path == saved.path, loaded
+
+    sampler_saved = training.save_weights_for_sampler("sdk-smoke-sampler").result(timeout=120)
+    sampler = training.create_sampling_client(sampler_saved.path)
+    sample = sampler.sample(
+        tinker.ModelInput.from_ints([1, 1, 1]),
+        1,
+        tinker.SamplingParams(max_tokens=1, temperature=0),
+    ).result(timeout=120)
+    assert len(sample.sequences) == 1 and len(sample.sequences[0].tokens) == 1, sample
+
+    rest = client.create_rest_client()
+    weights_info = rest.get_weights_info_by_tinker_path(saved.path).result(timeout=120)
+    assert weights_info.base_model == "Qwen/Qwen3-8B", weights_info
+    runs = rest.list_training_runs(limit=10).result(timeout=120)
+    assert any(run.training_run_id == info.model_id for run in runs.training_runs), runs
+    checkpoints = rest.list_checkpoints(info.model_id).result(timeout=120)
+    assert any(c.tinker_path == saved.path for c in checkpoints.checkpoints), checkpoints
+    user_checkpoints = rest.list_user_checkpoints(limit=10).result(timeout=120)
+    assert any(c.tinker_path == saved.path for c in user_checkpoints.checkpoints), user_checkpoints
+    archive = rest.get_checkpoint_archive_url_from_tinker_path(saved.path).result(timeout=120)
+    assert archive.url.startswith("file://"), archive
+    rest.publish_checkpoint_from_tinker_path(saved.path).result(timeout=120)
+    rest.unpublish_checkpoint_from_tinker_path(saved.path).result(timeout=120)
+    rest.set_checkpoint_ttl_from_tinker_path(saved.path, 3600).result(timeout=120)
+
+    delete_me = training.save_state("sdk-smoke-delete").result(timeout=120)
+    rest.delete_checkpoint_from_tinker_path(delete_me.path).result(timeout=120)
+    checkpoints = rest.list_checkpoints(info.model_id).result(timeout=120)
+    assert all(c.tinker_path != delete_me.path for c in checkpoints.checkpoints), checkpoints
+
+    print("SDK_SMOKE_OK", info.model_id, before, after, saved.path, sampler_saved.path)
+finally:
+    client.holder.close()
