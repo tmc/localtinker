@@ -134,6 +134,71 @@ func TestDrainNodeRequestsDrainOnHeartbeat(t *testing.T) {
 	}
 }
 
+func TestWatchStreamsDrainCommand(t *testing.T) {
+	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc, err := New(coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	rpc.Register(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	coordClient := tinkerv1connect.NewTinkerCoordinatorClient(server.Client(), server.URL)
+	adminClient := tinkerv1connect.NewTinkerAdminClient(server.Client(), server.URL)
+
+	reg, err := coordClient.RegisterNode(context.Background(), connect.NewRequest(&tinkerv1.RegisterNodeRequest{
+		NodeId: "node-a",
+		Name:   "Node A",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordClient.Heartbeat(context.Background(), connect.NewRequest(&tinkerv1.HeartbeatRequest{
+		NodeId: "node-a",
+		Load:   &tinkerv1.NodeLoad{ActiveLeases: 1},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adminClient.DrainNode(context.Background(), connect.NewRequest(&tinkerv1.DrainNodeRequest{
+		NodeId: "node-a",
+		Reason: "test drain",
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	stream, err := coordClient.Watch(ctx, connect.NewRequest(&tinkerv1.WatchRequest{
+		NodeId:        "node-a",
+		CoordinatorId: reg.Msg.GetCoordinatorId(),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stream.Receive() {
+		t.Fatalf("receive drain command: %v", stream.Err())
+	}
+	cmd := stream.Msg()
+	if cmd.GetKind() != "drain" || cmd.GetDrain() == nil {
+		t.Fatalf("command = %+v, want drain", cmd)
+	}
+	if cmd.GetCommandId() == "" || cmd.GetSeqId() == 0 || cmd.GetDeadlineUnixNano() == 0 {
+		t.Fatalf("command metadata = %+v", cmd)
+	}
+	if got := cmd.GetDrain().GetReason(); got != "test drain" {
+		t.Fatalf("drain reason = %q, want test drain", got)
+	}
+	if !cmd.GetDrain().GetCheckpoint() {
+		t.Fatal("checkpoint = false, want true")
+	}
+}
+
 func TestReportLifecycleUpdatesNodeState(t *testing.T) {
 	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
