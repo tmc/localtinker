@@ -97,6 +97,29 @@ func TestRequestBodyLimit(t *testing.T) {
 	}
 }
 
+func TestRejectsTrailingJSON(t *testing.T) {
+	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/telemetry", strings.NewReader(`{"events":[]} {}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+
+	var resp ErrorResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Code != "bad_request" || !strings.Contains(resp.Message, "multiple json values") {
+		t.Fatalf("response = %#v", resp)
+	}
+}
+
 func TestRetrieveFutureRoute(t *testing.T) {
 	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
