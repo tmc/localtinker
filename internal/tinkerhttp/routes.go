@@ -713,6 +713,15 @@ func (s *Server) checkpointAction(w http.ResponseWriter, r *http.Request, path s
 	}
 	switch {
 	case r.Method == http.MethodGet && action == "archive":
+		expired, err := s.coord.CheckpointExpired(r.Context(), tinkerPath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "system_error", err.Error())
+			return true
+		}
+		if expired {
+			writeError(w, http.StatusGone, "gone", "checkpoint expired")
+			return true
+		}
 		file, err := tinkertrain.CheckpointArchive(tinkerPath)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tmc/localtinker/internal/tinkercoord"
 	"github.com/tmc/localtinker/internal/tinkerdb"
@@ -444,6 +445,61 @@ func TestCheckpointActionsTrackMetadata(t *testing.T) {
 	checkpoints = checkpointList(t, h)
 	if len(checkpoints) != 0 {
 		t.Fatalf("checkpoints after delete = %#v", checkpoints)
+	}
+}
+
+func TestExpiredCheckpointIsHiddenAndArchiveGone(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LOCALTINKER_CHECKPOINT_ROOT", root)
+	if err := os.MkdirAll(filepath.Join(root, "model-a", "weights", "ckpt"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "model-a", "weights", "ckpt", "adapters.safetensors"), []byte("weights"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := tinkerdb.OpenMemory()
+	c, err := tinkercoord.New(tinkercoord.Config{Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "tinker://model-a/weights/ckpt"
+	if _, err := c.CompleteFuture(nil, map[string]any{
+		"type": "save_weights",
+		"path": path,
+	}, map[string]any{
+		"type":     "save_weights",
+		"model_id": "model-a",
+		"path":     path,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	expired := time.Now().UTC().Add(-time.Minute)
+	if err := store.PutCheckpoint(nil, tinkerdb.Checkpoint{
+		Path:      path,
+		Owner:     "local",
+		ExpiresAt: &expired,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	h := New(c).Handler()
+	if checkpoints := checkpointList(t, h); len(checkpoints) != 0 {
+		t.Fatalf("checkpoints = %#v, want none", checkpoints)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/training_runs/model-a/checkpoints/weights/ckpt/archive", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusGone {
+		t.Fatalf("status = %d, want %d body = %s", rec.Code, http.StatusGone, rec.Body.String())
+	}
+	var resp ErrorResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Code != "gone" || resp.Message != "checkpoint expired" {
+		t.Fatalf("response = %#v", resp)
 	}
 }
 
