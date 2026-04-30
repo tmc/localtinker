@@ -22,6 +22,7 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
 - `internal/tinkerartifact`, `internal/tinkernode`, and `internal/tinkerproto`
   provide the node/cache substrate.
 - `tinker` contains the experimental Go API.
+- The HTTP API enforces the request byte limit advertised in client config.
 
 ## 1. SDK Conformance
 
@@ -56,7 +57,7 @@ Goal: replace mostly synchronous execution with a real coordinator scheduler.
 
 - Add an operation queue with queued, running, complete, user_error,
   system_error, and canceled states.
-- Add bounded concurrency and request byte accounting.
+- Add bounded concurrency and operation byte accounting.
 - Add cancellation and lease timeout handling.
 - Persist enough operation metadata to survive coordinator restarts.
 - Match hosted `retrieve_future(..., allow_metadata_only=True)` behavior.
@@ -144,7 +145,7 @@ Goal: keep local behavior honest against hosted Tinker.
 
 ## Known Gaps
 
-- No true async scheduler or backpressure yet.
+- No true async scheduler or operation-level backpressure yet.
 - `cross_entropy` still uses a shifted-token MLX training path.
 - Arbitrary non-prefix fractional weights are not fully supported.
 - Prompt logprobs and top-k prompt logprobs are not implemented.
