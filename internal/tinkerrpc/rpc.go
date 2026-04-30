@@ -37,8 +37,9 @@ type Server struct {
 	mu    sync.Mutex
 	nodes map[string]*nodeState
 
-	manifests map[string]*tinkerv1.Manifest
-	aliases   map[string]string
+	manifests          map[string]*tinkerv1.Manifest
+	aliases            map[string]string
+	prewarmAssignments map[string]string
 }
 
 type nodeState struct {
@@ -83,11 +84,12 @@ func New(coord *tinkercoord.Coordinator) (*Server, error) {
 		return nil, err
 	}
 	return &Server{
-		coord:         coord,
-		coordinatorID: id,
-		nodes:         make(map[string]*nodeState),
-		manifests:     make(map[string]*tinkerv1.Manifest),
-		aliases:       make(map[string]string),
+		coord:              coord,
+		coordinatorID:      id,
+		nodes:              make(map[string]*nodeState),
+		manifests:          make(map[string]*tinkerv1.Manifest),
+		aliases:            make(map[string]string),
+		prewarmAssignments: make(map[string]string),
 	}, nil
 }
 
@@ -199,7 +201,7 @@ func (s *Server) Heartbeat(_ context.Context, req *connect.Request[tinkerv1.Hear
 	if node.state == nodeDraining && msg.GetLoad().GetActiveLeases() == 0 {
 		node.state = nodeDrained
 	}
-	prewarm := s.prewarmRootsLocked(node)
+	prewarm := s.prewarmRootsLocked(nodeID)
 	s.mu.Unlock()
 
 	return connect.NewResponse(&tinkerv1.HeartbeatResponse{
@@ -209,16 +211,100 @@ func (s *Server) Heartbeat(_ context.Context, req *connect.Request[tinkerv1.Hear
 	}), nil
 }
 
-func (s *Server) prewarmRootsLocked(node *nodeState) []string {
-	var roots []string
+func (s *Server) prewarmRootsLocked(nodeID string) []string {
+	counts := s.prewarmAssignmentCountsLocked()
+	roots := make([]string, 0, len(s.manifests))
 	for root := range s.manifests {
-		inv := node.artifacts[root]
-		if inv == nil || inv.GetState() != "complete" {
-			roots = append(roots, root)
-		}
+		roots = append(roots, root)
 	}
 	sort.Strings(roots)
-	return roots
+
+	var out []string
+	for _, root := range roots {
+		assigned := s.prewarmAssignments[root]
+		if assigned != "" && !s.prewarmAssignmentValidLocked(root, assigned) {
+			delete(s.prewarmAssignments, root)
+			assigned = ""
+		}
+		if assigned == "" {
+			assigned = s.selectPrewarmNodeLocked(root, counts)
+			if assigned != "" {
+				s.prewarmAssignments[root] = assigned
+				counts[assigned]++
+			}
+		}
+		if assigned == nodeID {
+			out = append(out, root)
+		}
+	}
+	return out
+}
+
+func (s *Server) prewarmAssignmentCountsLocked() map[string]int {
+	counts := make(map[string]int)
+	for root, nodeID := range s.prewarmAssignments {
+		if s.prewarmAssignmentValidLocked(root, nodeID) {
+			counts[nodeID]++
+		}
+	}
+	return counts
+}
+
+func (s *Server) prewarmAssignmentValidLocked(root, nodeID string) bool {
+	node := s.nodes[nodeID]
+	return s.nodeCanPrewarmLocked(node, root)
+}
+
+func (s *Server) selectPrewarmNodeLocked(root string, assigned map[string]int) string {
+	var bestID string
+	var bestNode *nodeState
+	for id, node := range s.nodes {
+		if !s.nodeCanPrewarmLocked(node, root) {
+			continue
+		}
+		if bestID == "" || lessLoadedNode(id, node, assigned[id], bestID, bestNode, assigned[bestID]) {
+			bestID, bestNode = id, node
+		}
+	}
+	return bestID
+}
+
+func (s *Server) nodeCanPrewarmLocked(node *nodeState, root string) bool {
+	if node == nil || node.state != nodeHealthy {
+		return false
+	}
+	if inv := node.artifacts[root]; inv != nil && inv.GetState() == "complete" {
+		return false
+	}
+	return true
+}
+
+func lessLoadedNode(id string, node *nodeState, assigned int, bestID string, best *nodeState, bestAssigned int) bool {
+	load := nodeLoadScore(node) + assigned
+	bestLoad := nodeLoadScore(best) + bestAssigned
+	if load != bestLoad {
+		return load < bestLoad
+	}
+	mem := nodeMemoryAvailable(node)
+	bestMem := nodeMemoryAvailable(best)
+	if mem != bestMem {
+		return mem > bestMem
+	}
+	return id < bestID
+}
+
+func nodeLoadScore(node *nodeState) int {
+	if node == nil || node.load == nil {
+		return 0
+	}
+	return int(node.load.GetActiveLeases()) + int(node.load.GetQueuedOperations())
+}
+
+func nodeMemoryAvailable(node *nodeState) uint64 {
+	if node == nil || node.load == nil {
+		return 0
+	}
+	return node.load.GetMemoryAvailableBytes()
 }
 
 func (s *Server) Watch(ctx context.Context, req *connect.Request[tinkerv1.WatchRequest], stream *connect.ServerStream[tinkerv1.NodeCommand]) error {
