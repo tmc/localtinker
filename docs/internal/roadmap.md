@@ -68,8 +68,8 @@ Goal: make checkpoints useful for both SDK workflows and node sync.
 
 - Store adapter weights, adapter config, optimizer state, and completion markers
   in a stable checkpoint layout.
-- Produce real tar archives for checkpoint downloads.
-- Return archive URLs consumable by the Tinker CLI.
+- Serve checkpoint archive URLs with hosted-style expiration metadata.
+- Keep tar archive downloads consumable by the Tinker CLI.
 - Track size, visibility, expiration, and owner metadata.
 - Implement publish, unpublish, TTL, and delete as stateful operations.
 - Keep training checkpoints and sampler checkpoints distinct.
@@ -124,6 +124,8 @@ Goal: make local operation visible without tailing logs.
 
 Goal: keep the project buildable from a clean checkout.
 
+- Remove temporary relative `replace` directives once upstream `mlx-go`,
+  `mlx-go-lm`, and `modelir` module versions are consumable directly.
 - Keep `go test ./...` passing with `GOWORK=off`.
 - Add release build commands for coordinator, node, and tray.
 - Document model cache, Python SDK, and credential setup.
@@ -148,14 +150,17 @@ Goal: keep local behavior honest against hosted Tinker.
 - Prompt logprobs and top-k prompt logprobs are not implemented.
 - String stops need tokenizer-backed sampling.
 - Optimizer state is not persisted.
-- Checkpoint archive URLs are compatibility shims, not full archive workflows.
+- Checkpoint archive URLs point at local tar files; hosted download, ownership,
+  and retention metadata remain incomplete.
 - Publish, unpublish, and TTL are compatibility shims.
+- The MLX dependency graph still needs temporary sibling-checkout replaces.
 - Hosted numerics and local MLX numerics will differ.
 
 ## Next Milestones
 
 1. Add SDK conformance tests for all currently supported routes.
 2. Replace shifted-token-only loss handling with dense CE tensors.
-3. Implement real checkpoint archives with completion markers.
+3. Add checkpoint metadata for publish, TTL, archive expiry, and ownership.
 4. Add operation queue state and asynchronous futures.
-5. Add tokenizer-backed string stops and generated-token logprobs.
+5. Remove temporary MLX/module replaces and document MLX library setup.
+6. Add tokenizer-backed string stops and generated-token logprobs.
