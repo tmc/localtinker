@@ -121,6 +121,101 @@ func TestCacheImportPublishAndSync(t *testing.T) {
 	}
 }
 
+func TestHandlePrewarmSyncsAndReportsInventory(t *testing.T) {
+	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc, err := tinkerrpc.New(coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordMux := http.NewServeMux()
+	rpc.Register(coordMux)
+	coordServer := httptest.NewServer(coordMux)
+	defer coordServer.Close()
+
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "weights.bin"), []byte("prewarm weights"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sourceStore, err := tinkerartifact.OpenStore(filepath.Join(t.TempDir(), "source", "artifact-store"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := sourceStore.AddDirectory(context.Background(), src, tinkerartifact.ManifestOptions{
+		Kind:      tinkerartifact.ArtifactTrainingCheckpoint,
+		Storage:   tinkerartifact.StorageTinker,
+		Name:      "prewarm",
+		ChunkSize: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	peerMux := http.NewServeMux()
+	tinkernode.RegisterArtifactPeer(peerMux, sourceStore)
+	peerServer := httptest.NewServer(peerMux)
+	defer peerServer.Close()
+
+	coordClient := tinkerv1connect.NewTinkerCoordinatorClient(coordServer.Client(), coordServer.URL)
+	tracker := tinkerv1connect.NewArtifactTrackerClient(coordServer.Client(), coordServer.URL)
+	if _, err := tracker.PublishManifest(context.Background(), connect.NewRequest(&tinkerv1.PublishManifestRequest{
+		Manifest: tinkerartifact.ToProto(manifest),
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordClient.RegisterNode(context.Background(), connect.NewRequest(&tinkerv1.RegisterNodeRequest{
+		NodeId: "source",
+		Labels: map[string]string{
+			"artifact_peer_url": peerServer.URL,
+		},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tracker.ReportInventory(context.Background(), connect.NewRequest(&tinkerv1.ReportInventoryRequest{
+		NodeId: "source",
+		Artifacts: []*tinkerv1.ArtifactInventory{{
+			RootHash:     manifest.RootHash,
+			State:        "complete",
+			BytesPresent: uint64(manifest.Size),
+		}},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordClient.RegisterNode(context.Background(), connect.NewRequest(&tinkerv1.RegisterNodeRequest{
+		NodeId: "target",
+		Labels: map[string]string{
+			"artifact_peer_url": "http://127.0.0.1:1",
+		},
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	targetStore, err := tinkerartifact.OpenStore(filepath.Join(t.TempDir(), "target", "artifact-store"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handlePrewarm(context.Background(), tracker, targetStore, "target", []string{manifest.RootHash}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(targetStore.Root, "artifacts", "sha256", manifest.RootHash, "files", "weights.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "prewarm weights" {
+		t.Fatalf("prewarmed weights = %q", got)
+	}
+
+	peers, err := tracker.ListPeers(context.Background(), connect.NewRequest(&tinkerv1.ListPeersRequest{RootHash: manifest.RootHash}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(peers.Msg.GetPeers()) != 2 {
+		t.Fatalf("peers = %d, want 2", len(peers.Msg.GetPeers()))
+	}
+}
+
 func TestCacheImportAndSyncHFHub(t *testing.T) {
 	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
