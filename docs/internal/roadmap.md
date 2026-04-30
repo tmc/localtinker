@@ -29,6 +29,8 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
   missing from a node inventory.
 - `localtinker-node run` prewarms missing artifacts from peers and reports the
   refreshed inventory.
+- `localtinker-node cache delete` removes installed artifacts and can report
+  the updated inventory.
 - Admin RPC exposes run summaries and run inspection payloads from coordinator
   state.
 - Node report streams update visible node lifecycle and telemetry labels.
@@ -119,7 +121,7 @@ Goal: make nodes useful local workers, not just cache/RPC scaffolding.
 - Assign work to nodes through leases.
 - Extend node operation lifecycle events with leased work assignment and
   terminal result handling.
-- Extend artifact retention with node-side delete execution.
+- Wire artifact retention decisions into leased node commands.
 - Extend node drain and health states with lease-aware draining and recovery.
 - Test coordinator-node-node artifact sync.
 
