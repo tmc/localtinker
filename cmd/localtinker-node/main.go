@@ -90,6 +90,12 @@ func runNode(args []string) error {
 		connect.WithReadMaxBytes(rpcMaxBytes),
 		connect.WithSendMaxBytes(rpcMaxBytes),
 	)
+	tracker := tinkerv1connect.NewArtifactTrackerClient(
+		http.DefaultClient,
+		*coordinator,
+		connect.WithReadMaxBytes(rpcMaxBytes),
+		connect.WithSendMaxBytes(rpcMaxBytes),
+	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -124,6 +130,8 @@ func runNode(args []string) error {
 		} else if resp.Msg.GetDrainRequested() {
 			log.Printf("drain requested")
 			return nil
+		} else if err := handlePrewarm(ctx, tracker, store, nodeID, resp.Msg.GetPrewarmRoots()); err != nil {
+			log.Printf("prewarm: %v", err)
 		}
 	} else {
 		log.Printf("artifact inventory: %v", err)
@@ -160,6 +168,9 @@ func runNode(args []string) error {
 			if resp.Msg.GetDrainRequested() {
 				log.Printf("drain requested")
 				return nil
+			}
+			if err := handlePrewarm(ctx, tracker, store, nodeID, resp.Msg.GetPrewarmRoots()); err != nil {
+				log.Printf("prewarm: %v", err)
 			}
 		}
 	}
@@ -276,20 +287,8 @@ func cacheSync(args []string) error {
 		connect.WithSendMaxBytes(rpcMaxBytes),
 	)
 	ctx := context.Background()
-	got, err := tracker.GetManifest(ctx, connect.NewRequest(&tinkerv1.GetManifestRequest{RootHashOrAlias: *rootHash}))
+	syncedRoot, err := syncArtifact(ctx, tracker, store, *rootHash)
 	if err != nil {
-		return err
-	}
-	manifest := tinkerartifact.FromProto(got.Msg.GetManifest())
-	peers, err := tracker.ListPeers(ctx, connect.NewRequest(&tinkerv1.ListPeersRequest{RootHash: manifest.RootHash}))
-	if err != nil {
-		return err
-	}
-	var urls []string
-	for _, peer := range peers.Msg.GetPeers() {
-		urls = append(urls, peer.GetAddress())
-	}
-	if err := tinkernode.SyncArtifact(ctx, store, manifest, urls); err != nil {
 		return err
 	}
 	if *nodeID != "" {
@@ -304,8 +303,56 @@ func cacheSync(args []string) error {
 			return err
 		}
 	}
-	fmt.Println(manifest.RootHash)
+	fmt.Println(syncedRoot)
 	return nil
+}
+
+func handlePrewarm(ctx context.Context, tracker tinkerv1connect.ArtifactTrackerClient, store *tinkerartifact.Store, nodeID string, roots []string) error {
+	if len(roots) == 0 {
+		return nil
+	}
+	synced := false
+	for _, root := range roots {
+		if root == "" || store.Has(root) {
+			continue
+		}
+		if _, err := syncArtifact(ctx, tracker, store, root); err != nil {
+			return fmt.Errorf("%s: %w", root, err)
+		}
+		synced = true
+	}
+	if !synced {
+		return nil
+	}
+	inv, err := artifactInventory(store)
+	if err != nil {
+		return err
+	}
+	_, err = tracker.ReportInventory(ctx, connect.NewRequest(&tinkerv1.ReportInventoryRequest{
+		NodeId:    nodeID,
+		Artifacts: inv,
+	}))
+	return err
+}
+
+func syncArtifact(ctx context.Context, tracker tinkerv1connect.ArtifactTrackerClient, store *tinkerartifact.Store, rootHashOrAlias string) (string, error) {
+	got, err := tracker.GetManifest(ctx, connect.NewRequest(&tinkerv1.GetManifestRequest{RootHashOrAlias: rootHashOrAlias}))
+	if err != nil {
+		return "", err
+	}
+	manifest := tinkerartifact.FromProto(got.Msg.GetManifest())
+	peers, err := tracker.ListPeers(ctx, connect.NewRequest(&tinkerv1.ListPeersRequest{RootHash: manifest.RootHash}))
+	if err != nil {
+		return "", err
+	}
+	var urls []string
+	for _, peer := range peers.Msg.GetPeers() {
+		urls = append(urls, peer.GetAddress())
+	}
+	if err := tinkernode.SyncArtifact(ctx, store, manifest, urls); err != nil {
+		return "", err
+	}
+	return manifest.RootHash, nil
 }
 
 func publishManifest(ctx context.Context, coordinator string, manifest *tinkerv1.Manifest, alias string) error {
