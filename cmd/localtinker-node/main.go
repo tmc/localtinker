@@ -192,6 +192,8 @@ func cache(args []string) error {
 		return cacheImport(args[1:])
 	case "sync":
 		return cacheSync(args[1:])
+	case "delete":
+		return cacheDelete(args[1:])
 	case "-h", "--help", "help":
 		_ = usage()
 		return nil
@@ -307,6 +309,50 @@ func cacheSync(args []string) error {
 	return nil
 }
 
+func cacheDelete(args []string) error {
+	fs := flag.NewFlagSet("cache delete", flag.ContinueOnError)
+	root := fs.String("root", defaultRoot(), "node state directory")
+	coordinator := fs.String("coordinator", "", "optional coordinator URL for inventory report")
+	rootHash := fs.String("root-hash", "", "artifact root hash")
+	nodeID := fs.String("node-id", "", "optional node ID for inventory report after delete")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if *rootHash == "" {
+		return fmt.Errorf("cache delete: missing -root-hash")
+	}
+	store, err := tinkerartifact.OpenStore(filepath.Join(*root, "artifact-store"))
+	if err != nil {
+		return err
+	}
+	if err := store.Delete(*rootHash); err != nil {
+		return err
+	}
+	if *coordinator != "" && *nodeID != "" {
+		tracker := tinkerv1connect.NewArtifactTrackerClient(
+			http.DefaultClient,
+			*coordinator,
+			connect.WithReadMaxBytes(rpcMaxBytes),
+			connect.WithSendMaxBytes(rpcMaxBytes),
+		)
+		inv, err := artifactInventory(store)
+		if err != nil {
+			return err
+		}
+		if _, err := tracker.ReportInventory(context.Background(), connect.NewRequest(&tinkerv1.ReportInventoryRequest{
+			NodeId:    *nodeID,
+			Artifacts: inv,
+		})); err != nil {
+			return err
+		}
+	}
+	fmt.Println(*rootHash)
+	return nil
+}
+
 func handlePrewarm(ctx context.Context, tracker tinkerv1connect.ArtifactTrackerClient, store *tinkerartifact.Store, nodeID string, roots []string) error {
 	if len(roots) == 0 {
 		return nil
@@ -414,6 +460,7 @@ func usage() error {
 	fmt.Fprintf(os.Stderr, "       localtinker-node cache root\n")
 	fmt.Fprintf(os.Stderr, "       localtinker-node cache import -src dir [-root dir] [-name alias] [-coordinator url]\n")
 	fmt.Fprintf(os.Stderr, "       localtinker-node cache sync -root-hash hash-or-alias [-coordinator url] [-root dir] [-node-id id]\n")
+	fmt.Fprintf(os.Stderr, "       localtinker-node cache delete -root-hash hash [-root dir] [-coordinator url] [-node-id id]\n")
 	return flag.ErrHelp
 }
 

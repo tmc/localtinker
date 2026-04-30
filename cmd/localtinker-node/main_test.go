@@ -29,6 +29,7 @@ func TestRunHelp(t *testing.T) {
 		{"cache", "--help"},
 		{"cache", "import", "--help"},
 		{"cache", "sync", "--help"},
+		{"cache", "delete", "--help"},
 	} {
 		if err := run(args); err != nil {
 			t.Fatalf("run(%q) = %v, want nil", args, err)
@@ -45,6 +46,33 @@ func TestRunUsageErrors(t *testing.T) {
 	}
 	if err := run([]string{"cache"}); err == nil {
 		t.Fatal(`run(["cache"]) = nil, want error`)
+	}
+}
+
+func TestCacheDelete(t *testing.T) {
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "weights.bin"), []byte("delete"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "node")
+	store, err := tinkerartifact.OpenStore(filepath.Join(root, "artifact-store"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := store.AddDirectory(context.Background(), src, tinkerartifact.ManifestOptions{
+		Kind:      tinkerartifact.ArtifactTrainingCheckpoint,
+		Storage:   tinkerartifact.StorageTinker,
+		Name:      "delete",
+		ChunkSize: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"cache", "delete", "-root", root, "-root-hash", manifest.RootHash}); err != nil {
+		t.Fatal(err)
+	}
+	if store.Has(manifest.RootHash) {
+		t.Fatal("artifact still installed")
 	}
 }
 
