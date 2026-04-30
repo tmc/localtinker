@@ -114,8 +114,12 @@ func runNode(args []string) error {
 	}
 	nodeID := reg.Msg.GetAssignedNodeId()
 	log.Printf("registered node %s with coordinator %s", nodeID, reg.Msg.GetCoordinatorId())
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+	go watchCommands(runCtx, client, nodeID, reg.Msg.GetCoordinatorId(), cancelRun)
+
 	if artifacts, err := artifactInventory(store); err == nil {
-		resp, err := client.Heartbeat(ctx, connect.NewRequest(&tinkerv1.HeartbeatRequest{
+		resp, err := client.Heartbeat(runCtx, connect.NewRequest(&tinkerv1.HeartbeatRequest{
 			NodeId:   nodeID,
 			UnixNano: time.Now().UnixNano(),
 			Load: &tinkerv1.NodeLoad{
@@ -129,8 +133,9 @@ func runNode(args []string) error {
 			log.Printf("initial heartbeat: %v", err)
 		} else if resp.Msg.GetDrainRequested() {
 			log.Printf("drain requested")
+			cancelRun()
 			return nil
-		} else if err := handlePrewarm(ctx, tracker, store, nodeID, resp.Msg.GetPrewarmRoots()); err != nil {
+		} else if err := handlePrewarm(runCtx, tracker, store, nodeID, resp.Msg.GetPrewarmRoots()); err != nil {
 			log.Printf("prewarm: %v", err)
 		}
 	} else {
@@ -141,14 +146,14 @@ func runNode(args []string) error {
 	defer ticker.Stop()
 	for {
 		select {
-		case <-ctx.Done():
+		case <-runCtx.Done():
 			return nil
 		case <-ticker.C:
 			artifacts, err := artifactInventory(store)
 			if err != nil {
 				log.Printf("artifact inventory: %v", err)
 			}
-			resp, err := client.Heartbeat(ctx, connect.NewRequest(&tinkerv1.HeartbeatRequest{
+			resp, err := client.Heartbeat(runCtx, connect.NewRequest(&tinkerv1.HeartbeatRequest{
 				NodeId:   nodeID,
 				UnixNano: time.Now().UnixNano(),
 				Load: &tinkerv1.NodeLoad{
@@ -159,7 +164,7 @@ func runNode(args []string) error {
 				Artifacts: artifacts,
 			}))
 			if err != nil {
-				if errors.Is(ctx.Err(), context.Canceled) {
+				if errors.Is(runCtx.Err(), context.Canceled) {
 					return nil
 				}
 				log.Printf("heartbeat: %v", err)
@@ -167,12 +172,58 @@ func runNode(args []string) error {
 			}
 			if resp.Msg.GetDrainRequested() {
 				log.Printf("drain requested")
+				cancelRun()
 				return nil
 			}
-			if err := handlePrewarm(ctx, tracker, store, nodeID, resp.Msg.GetPrewarmRoots()); err != nil {
+			if err := handlePrewarm(runCtx, tracker, store, nodeID, resp.Msg.GetPrewarmRoots()); err != nil {
 				log.Printf("prewarm: %v", err)
 			}
 		}
+	}
+}
+
+func watchCommands(ctx context.Context, client tinkerv1connect.TinkerCoordinatorClient, nodeID, coordinatorID string, cancel context.CancelFunc) {
+	for {
+		stream, err := client.Watch(ctx, connect.NewRequest(&tinkerv1.WatchRequest{
+			NodeId:        nodeID,
+			CoordinatorId: coordinatorID,
+		}))
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("watch: %v", err)
+			if !sleepContext(ctx, 5*time.Second) {
+				return
+			}
+			continue
+		}
+		for stream.Receive() {
+			cmd := stream.Msg()
+			if cmd.GetDrain() != nil {
+				log.Printf("drain command %s: %s", cmd.GetCommandId(), cmd.GetDrain().GetReason())
+				cancel()
+				return
+			}
+			log.Printf("unsupported command %s kind %q", cmd.GetCommandId(), cmd.GetKind())
+		}
+		if err := stream.Err(); err != nil && ctx.Err() == nil {
+			log.Printf("watch: %v", err)
+		}
+		if !sleepContext(ctx, 5*time.Second) {
+			return
+		}
+	}
+}
+
+func sleepContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 
