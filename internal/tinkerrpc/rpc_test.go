@@ -2,9 +2,11 @@ package tinkerrpc
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -129,6 +131,71 @@ func TestDrainNodeRequestsDrainOnHeartbeat(t *testing.T) {
 	}
 	if got := nodes.Msg.GetNodes()[0].GetState(); got != "drained" {
 		t.Fatalf("state = %q, want drained", got)
+	}
+}
+
+func TestAdminRunRoutes(t *testing.T) {
+	ctx := context.Background()
+	store := tinkerdb.OpenMemory()
+	coord, err := tinkercoord.New(tinkercoord.Config{Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutModel(ctx, tinkerdb.Model{
+		ID:          "model-a",
+		SessionID:   "sess-a",
+		BaseModel:   "Qwen/Qwen3-8B",
+		TokenizerID: "Qwen/Qwen3-8B",
+		IsLoRA:      true,
+		LoRARank:    8,
+		CreatedAt:   time.Unix(1, 0).UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coord.CompleteFuture(ctx, map[string]any{"ok": true}, map[string]any{
+		"type":     "forward",
+		"model_id": "model-a",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rpc, err := New(coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	rpc.Register(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	adminClient := tinkerv1connect.NewTinkerAdminClient(server.Client(), server.URL)
+	runs, err := adminClient.ListRuns(ctx, connect.NewRequest(&tinkerv1.ListRunsRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs.Msg.GetRuns()) != 1 {
+		t.Fatalf("runs = %d, want 1", len(runs.Msg.GetRuns()))
+	}
+	run := runs.Msg.GetRuns()[0]
+	if run.GetRunId() != "model-a" || run.GetAlgorithm() != "lora" || run.GetState() != "ready" {
+		t.Fatalf("run = %+v", run)
+	}
+
+	inspect, err := adminClient.InspectRun(ctx, connect.NewRequest(&tinkerv1.InspectRunRequest{RunId: "model-a"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Run tinkercoord.TrainingRun `json:"run"`
+	}
+	if err := json.Unmarshal(inspect.Msg.GetRunJson(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Run.TrainingRunID != "model-a" {
+		t.Fatalf("inspected run = %#v", body.Run)
+	}
+	if len(inspect.Msg.GetEventsJson()) != 1 {
+		t.Fatalf("events = %d, want 1", len(inspect.Msg.GetEventsJson()))
 	}
 }
 
