@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -259,12 +260,107 @@ func (s *Server) DrainNode(_ context.Context, req *connect.Request[tinkerv1.Drai
 	return connect.NewResponse(&tinkerv1.DrainNodeResponse{}), nil
 }
 
-func (s *Server) ListRuns(context.Context, *connect.Request[tinkerv1.ListRunsRequest]) (*connect.Response[tinkerv1.ListRunsResponse], error) {
-	return connect.NewResponse(&tinkerv1.ListRunsResponse{}), nil
+func (s *Server) ListRuns(ctx context.Context, _ *connect.Request[tinkerv1.ListRunsRequest]) (*connect.Response[tinkerv1.ListRunsResponse], error) {
+	runs, err := s.coord.TrainingRuns(ctx, 10000, 0)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	resp := &tinkerv1.ListRunsResponse{}
+	for _, run := range runs.TrainingRuns {
+		resp.Runs = append(resp.Runs, runSummary(run))
+	}
+	return connect.NewResponse(resp), nil
 }
 
-func (s *Server) InspectRun(context.Context, *connect.Request[tinkerv1.InspectRunRequest]) (*connect.Response[tinkerv1.InspectRunResponse], error) {
-	return connect.NewResponse(&tinkerv1.InspectRunResponse{}), nil
+func (s *Server) InspectRun(ctx context.Context, req *connect.Request[tinkerv1.InspectRunRequest]) (*connect.Response[tinkerv1.InspectRunResponse], error) {
+	runID := strings.TrimSpace(req.Msg.GetRunId())
+	if runID == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("missing run_id"))
+	}
+	runs, err := s.coord.TrainingRuns(ctx, 10000, 0)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	var run tinkercoord.TrainingRun
+	found := false
+	for _, candidate := range runs.TrainingRuns {
+		if candidate.TrainingRunID == runID {
+			run = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("run not found"))
+	}
+	checkpoints, err := s.coord.Checkpoints(ctx, runID, 10000, 0)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	runJSON, err := json.Marshal(struct {
+		Run         tinkercoord.TrainingRun  `json:"run"`
+		Checkpoints []tinkercoord.Checkpoint `json:"checkpoints,omitempty"`
+	}{
+		Run:         run,
+		Checkpoints: checkpoints.Checkpoints,
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	snapshot, err := s.coord.DashboardSnapshot(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	var events [][]byte
+	for _, future := range snapshot.Futures {
+		if future.ModelID != runID {
+			continue
+		}
+		eventJSON, err := json.Marshal(future)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+		events = append(events, eventJSON)
+	}
+	return connect.NewResponse(&tinkerv1.InspectRunResponse{
+		RunJson:    runJSON,
+		EventsJson: events,
+	}), nil
+}
+
+func runSummary(run tinkercoord.TrainingRun) *tinkerv1.RunSummary {
+	return &tinkerv1.RunSummary{
+		RunId:             run.TrainingRunID,
+		Name:              run.BaseModel,
+		Algorithm:         runAlgorithm(run),
+		State:             runState(run),
+		CurrentCheckpoint: runCheckpointPath(run),
+	}
+}
+
+func runAlgorithm(run tinkercoord.TrainingRun) string {
+	if run.IsLoRA {
+		return "lora"
+	}
+	return "full"
+}
+
+func runState(run tinkercoord.TrainingRun) string {
+	if run.Corrupted {
+		return "corrupted"
+	}
+	return "ready"
+}
+
+func runCheckpointPath(run tinkercoord.TrainingRun) string {
+	if run.LastCheckpoint != nil {
+		return run.LastCheckpoint.TinkerPath
+	}
+	if run.LastSamplerCheckpoint != nil {
+		return run.LastSamplerCheckpoint.TinkerPath
+	}
+	return ""
 }
 
 func (s *Server) ListArtifacts(context.Context, *connect.Request[tinkerv1.ListArtifactsRequest]) (*connect.Response[tinkerv1.ListArtifactsResponse], error) {
