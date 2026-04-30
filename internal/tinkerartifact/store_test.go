@@ -2,6 +2,7 @@ package tinkerartifact
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -72,6 +73,48 @@ func TestStoreAddDirectoryAndInstallFromChunks(t *testing.T) {
 	}
 	if string(got) != "0123456789" {
 		t.Fatalf("installed data = %q", got)
+	}
+}
+
+func TestStoreDeleteRemovesArtifactButKeepsChunks(t *testing.T) {
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "weights.bin"), []byte("delete me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenStore(filepath.Join(t.TempDir(), "store"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := store.AddDirectory(context.Background(), src, ManifestOptions{
+		Kind:      ArtifactTrainingCheckpoint,
+		Storage:   StorageTinker,
+		Name:      "ckpt",
+		ChunkSize: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashes, err := store.ChunkHashes(m.RootHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hashes) == 0 {
+		t.Fatal("no chunks")
+	}
+	if err := store.Delete(m.RootHash); err != nil {
+		t.Fatal(err)
+	}
+	if store.Has(m.RootHash) {
+		t.Fatal("artifact still installed")
+	}
+	if _, err := store.Manifest(m.RootHash); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("manifest error = %v, want ErrNotFound", err)
+	}
+	if _, err := os.Stat(store.chunkPath(hashes[0])); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Delete(m.RootHash); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete missing = %v, want ErrNotFound", err)
 	}
 }
 

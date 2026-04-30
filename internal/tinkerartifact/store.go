@@ -197,6 +197,24 @@ func (s *Store) Has(rootHash string) bool {
 	return err == nil
 }
 
+// Delete removes the installed artifact for rootHash.
+//
+// Delete leaves content-addressed chunks in place because chunks may be shared
+// by other artifacts.
+func (s *Store) Delete(rootHash string) error {
+	rootHash = cleanHash(rootHash)
+	if rootHash == "" {
+		return fmt.Errorf("delete artifact: empty root hash")
+	}
+	path := s.artifactPath(rootHash)
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return os.RemoveAll(path)
+}
+
 // Inventory returns installed artifacts.
 func (s *Store) Inventory() ([]Ref, error) {
 	roots, err := os.ReadDir(s.artifactsDir())
