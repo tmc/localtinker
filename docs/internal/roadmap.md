@@ -23,6 +23,8 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
   provide the node/cache substrate.
 - The Connect RPC surface accepts node registration and heartbeats and can
   request node drain through admin state.
+- The node watch stream validates watchers and emits drain commands for nodes
+  placed into drain state.
 - The artifact tracker records inventories and applies in-memory retention
   decisions for node-reported artifacts.
 - Coordinator heartbeats return artifact prewarm roots for published manifests
@@ -125,7 +127,8 @@ Goal: make nodes useful local workers, not just cache/RPC scaffolding.
 - Extend node operation lifecycle events with leased work assignment and
   persisted terminal result handling.
 - Wire artifact retention decisions into leased node commands.
-- Extend node drain and health states with lease-aware draining and recovery.
+- Extend node drain and health states with lease-aware draining, command
+  acknowledgement, and recovery.
 - Test coordinator-node-node artifact sync.
 
 ## 8. Tray and Dashboard
