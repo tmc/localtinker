@@ -70,8 +70,8 @@ Goal: make checkpoints useful for both SDK workflows and node sync.
   in a stable checkpoint layout.
 - Serve checkpoint archive URLs with hosted-style expiration metadata.
 - Keep tar archive downloads consumable by the Tinker CLI.
-- Track size, visibility, expiration, and owner metadata.
-- Implement publish, unpublish, TTL, and delete as stateful operations.
+- Keep size, visibility, expiration, and owner metadata in checkpoint listings.
+- Keep publish, unpublish, TTL, and delete stateful across coordinator restarts.
 - Keep training checkpoints and sampler checkpoints distinct.
 - Test download, extraction, load, and sampler creation end to end.
 
@@ -151,8 +151,7 @@ Goal: keep local behavior honest against hosted Tinker.
 - String stops need tokenizer-backed sampling.
 - Optimizer state is not persisted.
 - Checkpoint archive URLs point at local tar files; hosted download, ownership,
-  and retention metadata remain incomplete.
-- Publish, unpublish, and TTL are compatibility shims.
+  and retention policy enforcement remain incomplete.
 - The MLX dependency graph still needs temporary sibling-checkout replaces.
 - Hosted numerics and local MLX numerics will differ.
 
@@ -160,7 +159,7 @@ Goal: keep local behavior honest against hosted Tinker.
 
 1. Add SDK conformance tests for all currently supported routes.
 2. Replace shifted-token-only loss handling with dense CE tensors.
-3. Add checkpoint metadata for publish, TTL, archive expiry, and ownership.
+3. Add hosted-style checkpoint download ownership and retention enforcement.
 4. Add operation queue state and asynchronous futures.
 5. Remove temporary MLX/module replaces and document MLX library setup.
 6. Add tokenizer-backed string stops and generated-token logprobs.
