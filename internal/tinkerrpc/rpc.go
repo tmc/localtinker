@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -613,7 +614,47 @@ func (s *Server) SignalPeer(_ context.Context, stream *connect.BidiStream[tinker
 	}
 }
 
-func (s *Server) ReportTransfer(context.Context, *connect.Request[tinkerv1.ReportTransferRequest]) (*connect.Response[tinkerv1.ReportTransferResponse], error) {
+func (s *Server) ReportTransfer(_ context.Context, req *connect.Request[tinkerv1.ReportTransferRequest]) (*connect.Response[tinkerv1.ReportTransferResponse], error) {
+	msg := req.Msg
+	nodeID := msg.GetNodeId()
+	if nodeID == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("missing node_id"))
+	}
+	root := msg.GetRootHash()
+	if root == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("missing root_hash"))
+	}
+	state := msg.GetState()
+	if state == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("missing state"))
+	}
+
+	s.mu.Lock()
+	node := s.nodes[nodeID]
+	if node == nil {
+		node = &nodeState{state: nodeHealthy, artifacts: make(map[string]*tinkerv1.ArtifactInventory)}
+		s.nodes[nodeID] = node
+	}
+	if node.labels == nil {
+		node.labels = make(map[string]string)
+	}
+	node.labels["last_transfer_root_hash"] = root
+	node.labels["last_transfer_state"] = state
+	if peer := msg.GetPeerNodeId(); peer != "" {
+		node.labels["last_transfer_peer_node_id"] = peer
+	}
+	if bytes := msg.GetBytes(); bytes > 0 {
+		node.labels["last_transfer_bytes"] = strconv.FormatUint(bytes, 10)
+	}
+	if state == "complete" {
+		node.artifacts[root] = &tinkerv1.ArtifactInventory{
+			RootHash:     root,
+			State:        "complete",
+			BytesPresent: msg.GetBytes(),
+		}
+	}
+	node.lastSeenAt = time.Now().UTC()
+	s.mu.Unlock()
 	return connect.NewResponse(&tinkerv1.ReportTransferResponse{}), nil
 }
 
