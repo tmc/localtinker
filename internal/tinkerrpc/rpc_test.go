@@ -259,6 +259,53 @@ func TestReportLifecycleUpdatesNodeState(t *testing.T) {
 	}
 }
 
+func TestReportCommandAckUpdatesNodeLabels(t *testing.T) {
+	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc, err := New(coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	rpc.Register(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	coordClient := tinkerv1connect.NewTinkerCoordinatorClient(server.Client(), server.URL)
+	adminClient := tinkerv1connect.NewTinkerAdminClient(server.Client(), server.URL)
+
+	if _, err := coordClient.RegisterNode(context.Background(), connect.NewRequest(&tinkerv1.RegisterNodeRequest{
+		NodeId: "node-a",
+		Name:   "Node A",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	stream := coordClient.Report(context.Background())
+	if err := stream.Send(&tinkerv1.NodeEvent{
+		NodeId:    "node-a",
+		CommandId: "cmd-1",
+		Kind:      "drain",
+		Payload:   &tinkerv1.NodeEvent_Ack{Ack: &tinkerv1.CommandAck{}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stream.CloseAndReceive(); err != nil {
+		t.Fatal(err)
+	}
+
+	nodes, err := adminClient.ListNodes(context.Background(), connect.NewRequest(&tinkerv1.ListNodesRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels := nodes.Msg.GetNodes()[0].GetLabels()
+	if labels["last_command_ack_id"] != "cmd-1" || labels["last_command_ack_kind"] != "drain" {
+		t.Fatalf("labels = %+v", labels)
+	}
+}
+
 func TestReportOperationEventsUpdateLoad(t *testing.T) {
 	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {

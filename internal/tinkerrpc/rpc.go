@@ -324,6 +324,17 @@ func (s *Server) applyNodeEvent(event *tinkerv1.NodeEvent) error {
 			node.labels[k] = v
 		}
 	}
+	if event.GetAck() != nil {
+		if node.labels == nil {
+			node.labels = make(map[string]string)
+		}
+		if commandID := strings.TrimSpace(event.GetCommandId()); commandID != "" {
+			node.labels["last_command_ack_id"] = commandID
+		}
+		if kind := strings.TrimSpace(event.GetKind()); kind != "" {
+			node.labels["last_command_ack_kind"] = kind
+		}
+	}
 	switch {
 	case event.GetStarted() != nil:
 		load := nodeLoad(node)
