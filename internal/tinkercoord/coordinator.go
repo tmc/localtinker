@@ -24,18 +24,22 @@ const (
 	FutureUserError        = "user_error"
 	FutureSystemError      = "system_error"
 	FutureCanceled         = "canceled"
+
+	defaultMaxRequestBytes = 128 << 20
 )
 
 type Coordinator struct {
-	store tinkerdb.Store
-	train *tinkertrain.Manager
-	now   func() time.Time
+	store           tinkerdb.Store
+	train           *tinkertrain.Manager
+	now             func() time.Time
+	maxRequestBytes int
 }
 
 type Config struct {
-	Store tinkerdb.Store
-	Train *tinkertrain.Manager
-	Now   func() time.Time
+	Store           tinkerdb.Store
+	Train           *tinkertrain.Manager
+	Now             func() time.Time
+	MaxRequestBytes int
 }
 
 type Session struct {
@@ -168,14 +172,22 @@ func New(cfg Config) (*Coordinator, error) {
 	if cfg.Train == nil {
 		cfg.Train = tinkertrain.NewManager()
 	}
-	return &Coordinator{store: cfg.Store, train: cfg.Train, now: cfg.Now}, nil
+	if cfg.MaxRequestBytes <= 0 {
+		cfg.MaxRequestBytes = defaultMaxRequestBytes
+	}
+	return &Coordinator{
+		store:           cfg.Store,
+		train:           cfg.Train,
+		now:             cfg.Now,
+		maxRequestBytes: cfg.MaxRequestBytes,
+	}, nil
 }
 
 func (c *Coordinator) ClientConfig(_ context.Context) ClientConfig {
 	return ClientConfig{
 		UseJWT:               false,
 		ParallelFWDBWDChunks: false,
-		MaxRequestBytes:      128 << 20,
+		MaxRequestBytes:      c.maxRequestBytes,
 	}
 }
 

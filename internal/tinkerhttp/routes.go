@@ -52,7 +52,25 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/training_runs/", s.trainingRunPath)
 	mux.HandleFunc("PUT /api/v1/training_runs/", s.trainingRunPath)
 	mux.HandleFunc("DELETE /api/v1/training_runs/", s.trainingRunPath)
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if limitsRequestBody(r) {
+			cfg := s.coord.ClientConfig(r.Context())
+			r.Body = http.MaxBytesReader(w, r.Body, int64(cfg.MaxRequestBytes))
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+func limitsRequestBody(r *http.Request) bool {
+	if !strings.HasPrefix(r.URL.Path, "/api/v1/") {
+		return false
+	}
+	switch r.Method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) clientConfig(w http.ResponseWriter, r *http.Request) {
@@ -784,6 +802,10 @@ func decodeJSON(r *http.Request, v any) error {
 	}
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(v); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			return fmt.Errorf("request body exceeds %d bytes", maxErr.Limit)
+		}
 		return fmt.Errorf("decode json: %w", err)
 	}
 	return nil

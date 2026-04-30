@@ -65,6 +65,38 @@ func TestHandshakeRoutes(t *testing.T) {
 	}
 }
 
+func TestRequestBodyLimit(t *testing.T) {
+	c, err := tinkercoord.New(tinkercoord.Config{
+		Store:           tinkerdb.OpenMemory(),
+		MaxRequestBytes: 32,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+
+	var cfg ConfigResponse
+	postJSON(t, h, "/api/v1/client/config", nil, &cfg)
+	if cfg.MaxRequestBytes != 32 {
+		t.Fatalf("max_request_bytes = %d, want 32", cfg.MaxRequestBytes)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/telemetry", strings.NewReader(`{"events":["012345678901234567890123456789"]}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+
+	var resp ErrorResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Code != "bad_request" || !strings.Contains(resp.Message, "request body exceeds 32 bytes") {
+		t.Fatalf("response = %#v", resp)
+	}
+}
+
 func TestRetrieveFutureRoute(t *testing.T) {
 	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
