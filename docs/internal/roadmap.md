@@ -29,6 +29,8 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
   decisions for node-reported artifacts.
 - Coordinator heartbeats return artifact prewarm roots for published manifests
   missing from a node inventory.
+- Artifact prewarm roots are assigned to healthy nodes using active leases,
+  queued operations, existing prewarm assignments, and deterministic tie-breaks.
 - `localtinker-node run` prewarms missing artifacts from peers and reports the
   refreshed inventory.
 - `localtinker-node run` watches coordinator commands and exits on drain
@@ -133,6 +135,7 @@ Goal: make nodes useful local workers, not just cache/RPC scaffolding.
 - Add coordinator registration and heartbeat loops.
 - Advertise model, memory, disk, and backend capabilities.
 - Assign work to nodes through leases.
+- Extend load-aware assignment from artifact prewarm to operation leases.
 - Extend node operation lifecycle events with leased work assignment and
   persisted terminal result handling.
 - Wire artifact retention decisions into leased node commands.
