@@ -1,0 +1,38 @@
+python sdk_handshake.py
+stdout 'SDK_HANDSHAKE_OK'
+
+-- sdk_handshake.py --
+import os
+
+import httpx
+from tinker import ServiceClient
+
+
+base_url = os.environ["TINKER_BASE_URL"]
+client = ServiceClient()
+try:
+    caps = client.get_server_capabilities()
+    assert caps.supported_models, caps
+    model = caps.supported_models[0]
+    assert model.model_name == "Qwen/Qwen3-8B", model
+    assert "cross_entropy" in model.supported, model.supported
+
+    rest = client.create_rest_client()
+    runs = rest.list_training_runs(limit=1).result(timeout=120)
+    assert runs.cursor.total_count == 0, runs
+    checkpoints = rest.list_user_checkpoints(limit=1).result(timeout=120)
+    assert checkpoints.cursor.total_count == 0, checkpoints
+
+    raw = httpx.post(
+        f"{base_url}/api/v1/retrieve_future",
+        json={"request_id": "missing"},
+        timeout=5,
+    )
+    assert raw.status_code == 404, raw.text
+    body = raw.json()
+    assert body["status"] == "error", body
+    assert body["code"] == "not_found", body
+
+    print("SDK_HANDSHAKE_OK")
+finally:
+    client.holder.close()
