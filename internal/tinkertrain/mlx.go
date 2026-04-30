@@ -1,9 +1,11 @@
 package tinkertrain
 
 import (
+	"archive/tar"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +19,8 @@ import (
 	"github.com/tmc/mlx-go/mlx"
 	"github.com/tmc/mlx-go/mlx/random"
 )
+
+const checkpointCompleteFile = "complete"
 
 type mlxModel struct {
 	mu       sync.Mutex
@@ -193,6 +197,9 @@ func (m *mlxModel) saveAdapter(name, kind string) (string, error) {
 	if err := lmtrain.SaveAdapterConfig(dir, "lora", layers, m.adapters.Config()); err != nil {
 		return "", fmt.Errorf("save adapter config: %w", err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, checkpointCompleteFile), []byte("ok\n"), 0644); err != nil {
+		return "", fmt.Errorf("write completion marker: %w", err)
+	}
 	return "tinker://" + m.id + "/" + kind + "/" + cleanName(name), nil
 }
 
@@ -201,7 +208,7 @@ func (m *mlxModel) loadState(_ context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	file := filepath.Join(checkpointRoot(), parsed.ModelID, parsed.Kind, parsed.Name, "adapters.safetensors")
+	file := filepath.Join(checkpointDir(parsed), "adapters.safetensors")
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.adapters.LoadWeights(file); err != nil {
@@ -446,12 +453,42 @@ func CheckpointPathExists(path string) bool {
 	return err == nil
 }
 
+func CheckpointArchive(path string) (string, error) {
+	parsed, err := ParseTinkerPath(path)
+	if err != nil {
+		return "", err
+	}
+	dir := checkpointDir(parsed)
+	info, err := os.Stat(dir)
+	if err != nil {
+		return "", fmt.Errorf("stat checkpoint: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("checkpoint is not a directory")
+	}
+	archiveDir := filepath.Join(checkpointRoot(), "archives", parsed.ModelID, parsed.Kind)
+	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+		return "", fmt.Errorf("create archive dir: %w", err)
+	}
+	archive := filepath.Join(archiveDir, cleanName(parsed.Name)+".tar")
+	tmp := archive + ".tmp"
+	if err := writeCheckpointArchive(tmp, dir); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	if err := os.Rename(tmp, archive); err != nil {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("install checkpoint archive: %w", err)
+	}
+	return archive, nil
+}
+
 func CheckpointFile(path string) (string, error) {
 	parsed, err := ParseTinkerPath(path)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(checkpointRoot(), parsed.ModelID, parsed.Kind, parsed.Name, "adapters.safetensors"), nil
+	return filepath.Join(checkpointDir(parsed), "adapters.safetensors"), nil
 }
 
 func DeleteCheckpoint(path string) error {
@@ -459,7 +496,66 @@ func DeleteCheckpoint(path string) error {
 	if err != nil {
 		return err
 	}
-	return os.RemoveAll(filepath.Join(checkpointRoot(), parsed.ModelID, parsed.Kind, parsed.Name))
+	return os.RemoveAll(checkpointDir(parsed))
+}
+
+func checkpointDir(path TinkerPath) string {
+	return filepath.Join(checkpointRoot(), path.ModelID, path.Kind, cleanName(path.Name))
+}
+
+func writeCheckpointArchive(path, dir string) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create checkpoint archive: %w", err)
+	}
+	defer file.Close()
+
+	tw := tar.NewWriter(file)
+	err = filepath.WalkDir(dir, func(name string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, name)
+		if err != nil {
+			return err
+		}
+		hdr, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		hdr.Name = filepath.ToSlash(rel)
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		in, err := os.Open(name)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(tw, in)
+		closeErr := in.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		return closeErr
+	})
+	if err != nil {
+		_ = tw.Close()
+		return fmt.Errorf("write checkpoint archive: %w", err)
+	}
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("close checkpoint archive: %w", err)
+	}
+	return nil
 }
 
 func checkpointRoot() string {
