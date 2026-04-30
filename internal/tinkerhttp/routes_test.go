@@ -57,6 +57,10 @@ func TestHandshakeRoutes(t *testing.T) {
 	if len(caps.SupportedModels) == 0 {
 		t.Fatal("no supported models")
 	}
+	supported, ok := caps.SupportedModels[0]["supported"].([]any)
+	if !ok || len(supported) == 0 {
+		t.Fatalf("supported capabilities = %#v, want non-empty list", caps.SupportedModels[0]["supported"])
+	}
 }
 
 func TestRetrieveFutureRoute(t *testing.T) {
@@ -235,6 +239,22 @@ func TestTrainingInputValidationReturnsUserErrors(t *testing.T) {
 				}
 			},
 			want: "weights length 2 does not match target_tokens length 4",
+		},
+		{
+			name: "bad weights shape",
+			edit: func(d map[string]any) {
+				d["loss_fn_inputs"].(map[string]any)["target_tokens"] = map[string]any{
+					"data":  []int{2, 2, 2, 2},
+					"dtype": "int64",
+					"shape": []int{2, 2},
+				}
+				d["loss_fn_inputs"].(map[string]any)["weights"] = map[string]any{
+					"data":  []float64{1, 1, 1, 1},
+					"dtype": "float32",
+					"shape": []int{4},
+				}
+			},
+			want: "weights shape [4] does not match target_tokens shape [2 2]",
 		},
 		{
 			name: "bad shape",
