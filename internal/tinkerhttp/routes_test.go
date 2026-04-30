@@ -365,6 +365,118 @@ func TestTrainingInputValidationReturnsUserErrors(t *testing.T) {
 	}
 }
 
+func TestConformanceMalformedTrainingInputsReturnUserErrors(t *testing.T) {
+	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+
+	validDatum := func() map[string]any {
+		return map[string]any{
+			"model_input": map[string]any{
+				"chunks": []any{
+					map[string]any{
+						"type":   "encoded_text",
+						"tokens": []int{1, 1, 1, 1},
+					},
+				},
+			},
+			"loss_fn_inputs": map[string]any{
+				"target_tokens": map[string]any{
+					"data":  []int{1, 1, 1, 1},
+					"dtype": "int64",
+				},
+			},
+		}
+	}
+	request := func(datum map[string]any) map[string]any {
+		return map[string]any{
+			"model_id": "model-a",
+			"forward_input": map[string]any{
+				"loss_fn": "cross_entropy",
+				"data":    []any{datum},
+			},
+		}
+	}
+	tests := []struct {
+		name string
+		edit func(map[string]any)
+		want string
+	}{
+		{
+			name: "missing loss inputs",
+			edit: func(d map[string]any) {
+				delete(d, "loss_fn_inputs")
+			},
+			want: "missing loss_fn_inputs",
+		},
+		{
+			name: "unsupported loss input",
+			edit: func(d map[string]any) {
+				d["loss_fn_inputs"].(map[string]any)["mask"] = map[string]any{
+					"data":  []float64{1, 1, 1, 1},
+					"dtype": "float32",
+				}
+			},
+			want: `unsupported loss_fn_inputs key "mask"`,
+		},
+		{
+			name: "sparse tensor",
+			edit: func(d map[string]any) {
+				d["loss_fn_inputs"].(map[string]any)["target_tokens"] = map[string]any{
+					"data":                []int{1, 1, 1, 1},
+					"dtype":               "int64",
+					"sparse_crow_indices": []int{0, 1},
+				}
+			},
+			want: "sparse tensors are not supported",
+		},
+		{
+			name: "bad dtype",
+			edit: func(d map[string]any) {
+				d["loss_fn_inputs"].(map[string]any)["target_tokens"] = map[string]any{
+					"data":  []int{1, 1, 1, 1},
+					"dtype": "float32",
+				}
+			},
+			want: `dtype "float32", want int64`,
+		},
+		{
+			name: "bad shape",
+			edit: func(d map[string]any) {
+				d["loss_fn_inputs"].(map[string]any)["target_tokens"] = map[string]any{
+					"data":  []int{1, 1, 1, 1},
+					"dtype": "int64",
+					"shape": []int{2, 3},
+				}
+			},
+			want: "shape [2 3] has 6 elements but data has 4",
+		},
+		{
+			name: "input target mismatch",
+			edit: func(d map[string]any) {
+				d["loss_fn_inputs"].(map[string]any)["target_tokens"] = map[string]any{
+					"data":  []int{1, 1, 1},
+					"dtype": "int64",
+				}
+			},
+			want: "input tokens length 4 does not match target_tokens length 3",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			datum := validDatum()
+			tt.edit(datum)
+			var resp map[string]string
+			postJSONStatus(t, h, "/api/v1/forward", request(datum), http.StatusBadRequest, &resp)
+			if resp["category"] != "user" || !strings.Contains(resp["error"], tt.want) {
+				t.Fatalf("response = %#v, want user error containing %q", resp, tt.want)
+			}
+		})
+	}
+}
+
 func TestCreateModelGetInfoAndUnload(t *testing.T) {
 	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
