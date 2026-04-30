@@ -23,6 +23,8 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
   provide the node/cache substrate.
 - The Connect RPC surface accepts node registration and heartbeats and can
   request node drain through admin state.
+- The artifact tracker records inventories and applies in-memory retention
+  decisions for node-reported artifacts.
 - `tinker` contains the experimental Go API.
 - The HTTP API enforces the request byte limit advertised in client config.
 
@@ -108,7 +110,7 @@ Goal: make nodes useful local workers, not just cache/RPC scaffolding.
 - Advertise model, memory, disk, and backend capabilities.
 - Assign work to nodes through leases.
 - Stream node operation lifecycle events.
-- Support artifact prewarm and retention.
+- Support artifact prewarm and node-side retention execution.
 - Extend node drain and health states with lease-aware draining and recovery.
 - Test coordinator-node-node artifact sync.
 
