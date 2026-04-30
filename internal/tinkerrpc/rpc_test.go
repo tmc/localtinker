@@ -755,3 +755,50 @@ func TestReportTransferUpdatesNodeInventory(t *testing.T) {
 		t.Fatalf("labels = %#v", labels)
 	}
 }
+
+func TestReportTransferRecordsFailure(t *testing.T) {
+	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc, err := New(coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	rpc.Register(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	tracker := tinkerv1connect.NewArtifactTrackerClient(server.Client(), server.URL)
+	adminClient := tinkerv1connect.NewTinkerAdminClient(server.Client(), server.URL)
+	if _, err := tracker.ReportTransfer(context.Background(), connect.NewRequest(&tinkerv1.ReportTransferRequest{
+		NodeId:     "node-a",
+		RootHash:   "root-a",
+		PeerNodeId: "peer-a",
+		State:      "failed",
+		Error: &tinkerv1.ErrorInfo{
+			Code:    "transfer_failed",
+			Message: "peer fetch failed",
+		},
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	nodes, err := adminClient.ListNodes(context.Background(), connect.NewRequest(&tinkerv1.ListNodesRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels := nodes.Msg.GetNodes()[0].GetLabels()
+	if labels["last_transfer_state"] != "failed" || labels["last_transfer_error_code"] != "transfer_failed" || labels["last_transfer_error_message"] != "peer fetch failed" {
+		t.Fatalf("labels = %#v", labels)
+	}
+	peers, err := tracker.ListPeers(context.Background(), connect.NewRequest(&tinkerv1.ListPeersRequest{RootHash: "root-a"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(peers.Msg.GetPeers()) != 0 {
+		t.Fatalf("peers = %d, want 0", len(peers.Msg.GetPeers()))
+	}
+}
