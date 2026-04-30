@@ -25,6 +25,8 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
   request node drain through admin state.
 - The artifact tracker records inventories and applies in-memory retention
   decisions for node-reported artifacts.
+- Admin RPC exposes run summaries and run inspection payloads from coordinator
+  state.
 - `tinker` contains the experimental Go API.
 - The HTTP API enforces the request byte limit advertised in client config.
 
@@ -119,7 +121,7 @@ Goal: make nodes useful local workers, not just cache/RPC scaffolding.
 Goal: make local operation visible without tailing logs.
 
 - Show coordinator health, active runs, queued operations, node health, and
-  recent errors.
+  recent errors using the HTTP dashboard and admin RPC surfaces.
 - Link tray actions to dashboard pages.
 - Show local checkpoint paths and archive availability.
 - Keep tray polling cheap and robust when the coordinator is down.
