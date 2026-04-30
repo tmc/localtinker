@@ -42,12 +42,13 @@ type Server struct {
 }
 
 type nodeState struct {
-	req        *tinkerv1.RegisterNodeRequest
-	load       *tinkerv1.NodeLoad
-	labels     map[string]string
-	state      string
-	lastSeenAt time.Time
-	artifacts  map[string]*tinkerv1.ArtifactInventory
+	req         *tinkerv1.RegisterNodeRequest
+	load        *tinkerv1.NodeLoad
+	labels      map[string]string
+	state       string
+	drainReason string
+	lastSeenAt  time.Time
+	artifacts   map[string]*tinkerv1.ArtifactInventory
 }
 
 type Snapshot struct {
@@ -220,9 +221,60 @@ func (s *Server) prewarmRootsLocked(node *nodeState) []string {
 	return roots
 }
 
-func (s *Server) Watch(ctx context.Context, _ *connect.Request[tinkerv1.WatchRequest], _ *connect.ServerStream[tinkerv1.NodeCommand]) error {
-	<-ctx.Done()
-	return ctx.Err()
+func (s *Server) Watch(ctx context.Context, req *connect.Request[tinkerv1.WatchRequest], stream *connect.ServerStream[tinkerv1.NodeCommand]) error {
+	nodeID := strings.TrimSpace(req.Msg.GetNodeId())
+	if nodeID == "" {
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("missing node_id"))
+	}
+	if coordID := strings.TrimSpace(req.Msg.GetCoordinatorId()); coordID != "" && coordID != s.coordinatorID {
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("coordinator_id mismatch"))
+	}
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		cmd, err := s.watchCommand(nodeID)
+		if err != nil {
+			return err
+		}
+		if cmd != nil {
+			return stream.Send(cmd)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *Server) watchCommand(nodeID string) (*tinkerv1.NodeCommand, error) {
+	s.mu.Lock()
+	node := s.nodes[nodeID]
+	if node == nil {
+		s.mu.Unlock()
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("unknown node"))
+	}
+	state := node.state
+	reason := node.drainReason
+	s.mu.Unlock()
+
+	if state != nodeDraining && state != nodeDrained {
+		return nil, nil
+	}
+	if reason == "" {
+		reason = "admin requested drain"
+	}
+	now := time.Now().UTC()
+	return &tinkerv1.NodeCommand{
+		CommandId:        "drain-" + nodeID,
+		Kind:             "drain",
+		SeqId:            now.UnixNano(),
+		DeadlineUnixNano: now.Add(30 * time.Second).UnixNano(),
+		Directive: &tinkerv1.NodeCommand_Drain{
+			Drain: &tinkerv1.DrainLease{Reason: reason, Checkpoint: true},
+		},
+	}, nil
 }
 
 func (s *Server) Report(_ context.Context, stream *connect.ClientStream[tinkerv1.NodeEvent]) (*connect.Response[tinkerv1.ReportResponse], error) {
@@ -330,6 +382,7 @@ func (s *Server) DrainNode(_ context.Context, req *connect.Request[tinkerv1.Drai
 		s.mu.Unlock()
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("unknown node"))
 	}
+	node.drainReason = strings.TrimSpace(req.Msg.GetReason())
 	if node.load != nil && node.load.GetActiveLeases() == 0 {
 		node.state = nodeDrained
 	} else {
