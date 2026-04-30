@@ -223,3 +223,70 @@ func TestArtifactTrackerManifestInventoryAndPeers(t *testing.T) {
 		t.Fatalf("artifacts = %+v", artifacts.Msg.GetArtifacts())
 	}
 }
+
+func TestApplyRetentionUpdatesNodeInventory(t *testing.T) {
+	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc, err := New(coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	rpc.Register(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	coordClient := tinkerv1connect.NewTinkerCoordinatorClient(server.Client(), server.URL)
+	tracker := tinkerv1connect.NewArtifactTrackerClient(server.Client(), server.URL)
+
+	if _, err := coordClient.RegisterNode(context.Background(), connect.NewRequest(&tinkerv1.RegisterNodeRequest{
+		NodeId: "node-a",
+		Labels: map[string]string{
+			"artifact_peer_url": "http://127.0.0.1:9000",
+		},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tracker.ReportInventory(context.Background(), connect.NewRequest(&tinkerv1.ReportInventoryRequest{
+		NodeId: "node-a",
+		Artifacts: []*tinkerv1.ArtifactInventory{
+			{RootHash: "root-a", State: "complete", BytesPresent: 4},
+			{RootHash: "root-b", State: "complete", BytesPresent: 8},
+		},
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	retention, err := tracker.ApplyRetention(context.Background(), connect.NewRequest(&tinkerv1.ApplyRetentionRequest{
+		NodeId:              "node-a",
+		ProtectedRootHashes: []string{"root-b"},
+		TargetFreeBytes:     4,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := retention.Msg.GetDeletedRootHashes(); len(got) != 1 || got[0] != "root-a" {
+		t.Fatalf("deleted roots = %v, want [root-a]", got)
+	}
+	if got := retention.Msg.GetBytesDeleted(); got != 4 {
+		t.Fatalf("bytes deleted = %d, want 4", got)
+	}
+
+	peers, err := tracker.ListPeers(context.Background(), connect.NewRequest(&tinkerv1.ListPeersRequest{RootHash: "root-a"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(peers.Msg.GetPeers()) != 0 {
+		t.Fatalf("root-a peers = %d, want 0", len(peers.Msg.GetPeers()))
+	}
+	peers, err = tracker.ListPeers(context.Background(), connect.NewRequest(&tinkerv1.ListPeersRequest{RootHash: "root-b"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(peers.Msg.GetPeers()) != 1 {
+		t.Fatalf("root-b peers = %d, want 1", len(peers.Msg.GetPeers()))
+	}
+}
