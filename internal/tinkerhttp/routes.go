@@ -133,6 +133,7 @@ func (s *Server) getServerCapabilities(w http.ResponseWriter, r *http.Request) {
 			"model_name":         model.ModelID,
 			"max_context_length": model.ContextLength,
 			"tokenizer_id":       model.TokenizerID,
+			"supported":          model.Supported,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"supported_models": models})
@@ -564,10 +565,25 @@ func validateCrossEntropyDatum(i int, datum tinkertrain.Datum) error {
 	if weight, ok := datum.LossFnInputs["weights"]; ok && len(weight.Data) != len(target.Data) {
 		return fmt.Errorf("datum %d weights length %d does not match target_tokens length %d", i, len(weight.Data), len(target.Data))
 	}
+	if weight, ok := datum.LossFnInputs["weights"]; ok && !sameShape(weight.Shape, target.Shape) {
+		return fmt.Errorf("datum %d weights shape %v does not match target_tokens shape %v", i, weight.Shape, target.Shape)
+	}
 	if tokens := tokenCount(datum.ModelInput); tokens != len(target.Data) {
 		return fmt.Errorf("datum %d input tokens length %d does not match target_tokens length %d", i, tokens, len(target.Data))
 	}
 	return nil
+}
+
+func sameShape(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func tokenCount(input tinkertrain.ModelInput) int {
@@ -678,7 +694,7 @@ func (s *Server) checkpointAction(w http.ResponseWriter, r *http.Request, path s
 	}
 	switch {
 	case r.Method == http.MethodGet && action == "archive":
-		file, err := tinkertrain.CheckpointFile(tinkerPath)
+		file, err := tinkertrain.CheckpointArchive(tinkerPath)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 			return true
