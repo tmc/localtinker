@@ -1,0 +1,82 @@
+python sdk_async_errors.py
+stdout 'SDK_ASYNC_ERRORS_OK'
+
+-- sdk_async_errors.py --
+import os
+
+import httpx
+from tinker import ServiceClient
+
+
+base_url = os.environ["TINKER_BASE_URL"]
+client = ServiceClient()
+try:
+    def post(path, req, status=400):
+        resp = httpx.post(f"{base_url}{path}", json=req, timeout=5)
+        assert resp.status_code == status, (path, resp.status_code, resp.text)
+        return resp.json()
+
+    body = post("/api/v1/create_model", {"base_model": "Qwen/Qwen3-8B"})
+    assert body["code"] == "bad_request", body
+    assert body["message"] == "missing session_id", body
+
+    valid_input = {
+        "loss_fn": "cross_entropy",
+        "data": [
+            {
+                "model_input": {
+                    "chunks": [{"type": "encoded_text", "tokens": [1]}],
+                },
+                "loss_fn_inputs": {
+                    "target_tokens": {"data": [1], "dtype": "int64"},
+                },
+            }
+        ],
+    }
+    body = post("/api/v1/forward", {"forward_input": valid_input})
+    assert body["code"] == "bad_request", body
+    assert body["message"] == "missing model_id", body
+
+    body = post("/api/v1/optim_step", {"adam_params": {"learning_rate": 1e-4}})
+    assert body["code"] == "bad_request", body
+    assert body["message"] == "missing model_id", body
+
+    resp = httpx.post(
+        f"{base_url}/api/v1/save_weights",
+        json={"model_id": "missing-model"},
+        timeout=5,
+    )
+    assert resp.status_code == 200, resp.text
+    future = resp.json()
+    body = post(
+        "/api/v1/retrieve_future",
+        {"request_id": future["request_id"]},
+        status=200,
+    )
+    assert body["category"] == "user", body
+    assert body["request_id"] == future["request_id"], body
+    assert body["future_id"] == future["request_id"], body
+
+    body = post(
+        "/api/v1/asample",
+        {
+            "sampling_session_id": "sample-a",
+            "num_samples": 0,
+            "prompt": {"chunks": [{"tokens": [1]}]},
+            "sampling_params": {"max_tokens": 1},
+        },
+    )
+    assert body["category"] == "user", body
+    assert body["error"] == "num_samples must be positive", body
+
+    body = post(
+        "/api/v1/retrieve_future",
+        {"request_id": "missing"},
+        status=404,
+    )
+    assert body["status"] == "error", body
+    assert body["code"] == "not_found", body
+
+    print("SDK_ASYNC_ERRORS_OK")
+finally:
+    client.holder.close()
