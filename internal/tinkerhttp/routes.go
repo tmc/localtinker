@@ -618,12 +618,6 @@ func validateSampleRequest(req tinkertrain.SampleRequest) error {
 	if req.SamplingSessionID == "" && req.ModelPath == "" && req.BaseModel == "" {
 		return errors.New("missing sampling_session_id, model_path, or base_model")
 	}
-	if req.NumSamples <= 0 {
-		return errors.New("num_samples must be positive")
-	}
-	if req.SamplingParams.MaxTokens <= 0 {
-		return errors.New("max_tokens must be positive")
-	}
 	if tokenCount(req.Prompt) == 0 {
 		return errors.New("prompt is empty")
 	}
