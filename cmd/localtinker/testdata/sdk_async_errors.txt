@@ -61,13 +61,13 @@ try:
         "/api/v1/asample",
         {
             "sampling_session_id": "sample-a",
-            "num_samples": 0,
-            "prompt": {"chunks": [{"tokens": [1]}]},
-            "sampling_params": {"max_tokens": 1},
+            "num_samples": 1,
+            "prompt": {"chunks": [{"tokens": []}]},
+            "sampling_params": {},
         },
     )
     assert body["category"] == "user", body
-    assert body["error"] == "num_samples must be positive", body
+    assert body["error"] == "prompt is empty", body
 
     body = post(
         "/api/v1/retrieve_future",

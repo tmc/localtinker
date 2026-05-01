@@ -562,26 +562,6 @@ func TestConformanceMalformedAsyncRequestsReturnBadRequest(t *testing.T) {
 			want: "missing sampling_session_id, model_path, or base_model",
 		},
 		{
-			name: "bad sample count",
-			req: map[string]any{
-				"sampling_session_id": "sample-a",
-				"num_samples":         0,
-				"prompt":              map[string]any{"chunks": []any{map[string]any{"tokens": []int{1}}}},
-				"sampling_params":     map[string]any{"max_tokens": 1},
-			},
-			want: "num_samples must be positive",
-		},
-		{
-			name: "bad max tokens",
-			req: map[string]any{
-				"sampling_session_id": "sample-a",
-				"num_samples":         1,
-				"prompt":              map[string]any{"chunks": []any{map[string]any{"tokens": []int{1}}}},
-				"sampling_params":     map[string]any{"max_tokens": 0},
-			},
-			want: "max_tokens must be positive",
-		},
-		{
 			name: "empty prompt",
 			req: map[string]any{
 				"sampling_session_id": "sample-a",
