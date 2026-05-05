@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/tmc/localtinker/internal/tinkerdb"
@@ -26,6 +27,8 @@ const (
 	FutureCanceled         = "canceled"
 
 	defaultMaxRequestBytes = 128 << 20
+	defaultMaxOperations   = 1
+	defaultLeaseTimeout    = 30 * time.Second
 )
 
 type Coordinator struct {
@@ -33,6 +36,13 @@ type Coordinator struct {
 	train           *tinkertrain.Manager
 	now             func() time.Time
 	maxRequestBytes int
+
+	maxOperations int
+	leaseTimeout  time.Duration
+	sem           chan struct{}
+	wg            sync.WaitGroup
+	mu            sync.Mutex
+	closed        bool
 }
 
 type Config struct {
@@ -40,6 +50,8 @@ type Config struct {
 	Train           *tinkertrain.Manager
 	Now             func() time.Time
 	MaxRequestBytes int
+	MaxOperations   int
+	LeaseTimeout    time.Duration
 }
 
 type Session struct {
@@ -128,13 +140,28 @@ type Future struct {
 	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
+type operationFunc func(context.Context) (any, error)
+
 type DashboardSnapshot struct {
 	GeneratedAt  time.Time          `json:"generated_at"`
 	ClientConfig ClientConfig       `json:"client_config"`
 	Capabilities ServerCapabilities `json:"capabilities"`
+	Queue        QueueState         `json:"queue"`
 	Sessions     []Session          `json:"sessions"`
 	Models       []DashboardModel   `json:"models"`
 	Futures      []DashboardFuture  `json:"futures"`
+}
+
+type QueueState struct {
+	Queued       int   `json:"queued"`
+	Running      int   `json:"running"`
+	Complete     int   `json:"complete"`
+	UserError    int   `json:"user_error"`
+	SystemError  int   `json:"system_error"`
+	Canceled     int   `json:"canceled"`
+	QueuedBytes  int64 `json:"queued_bytes"`
+	RunningBytes int64 `json:"running_bytes"`
+	ResultBytes  int64 `json:"result_bytes"`
 }
 
 type DashboardModel struct {
@@ -148,16 +175,19 @@ type DashboardModel struct {
 }
 
 type DashboardFuture struct {
-	ID          string    `json:"id"`
-	State       string    `json:"state"`
-	Operation   string    `json:"operation,omitempty"`
-	ModelID     string    `json:"model_id,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	CompletedAt time.Time `json:"completed_at,omitempty"`
-	ResultBytes int       `json:"result_bytes"`
-	ErrorBytes  int       `json:"error_bytes"`
-	Metrics     MetricMap `json:"metrics,omitempty"`
-	Error       string    `json:"error,omitempty"`
+	ID             string    `json:"id"`
+	State          string    `json:"state"`
+	Operation      string    `json:"operation,omitempty"`
+	ModelID        string    `json:"model_id,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	CompletedAt    time.Time `json:"completed_at,omitempty"`
+	ResultBytes    int       `json:"result_bytes"`
+	ErrorBytes     int       `json:"error_bytes"`
+	RequestBytes   int64     `json:"request_bytes"`
+	LeaseID        string    `json:"lease_id,omitempty"`
+	LeaseExpiresAt time.Time `json:"lease_expires_at,omitempty"`
+	Metrics        MetricMap `json:"metrics,omitempty"`
+	Error          string    `json:"error,omitempty"`
 }
 
 type MetricMap map[string]float64
@@ -175,12 +205,24 @@ func New(cfg Config) (*Coordinator, error) {
 	if cfg.MaxRequestBytes <= 0 {
 		cfg.MaxRequestBytes = defaultMaxRequestBytes
 	}
-	return &Coordinator{
+	if cfg.MaxOperations <= 0 {
+		cfg.MaxOperations = defaultMaxOperations
+	}
+	if cfg.LeaseTimeout <= 0 {
+		cfg.LeaseTimeout = defaultLeaseTimeout
+	}
+	c := &Coordinator{
 		store:           cfg.Store,
 		train:           cfg.Train,
 		now:             cfg.Now,
 		maxRequestBytes: cfg.MaxRequestBytes,
-	}, nil
+		maxOperations:   cfg.MaxOperations,
+		leaseTimeout:    cfg.LeaseTimeout,
+		sem:             make(chan struct{}, cfg.MaxOperations),
+	}
+	c.recoverRunning(context.Background())
+	c.dispatchQueued(context.Background())
+	return c, nil
 }
 
 func (c *Coordinator) ClientConfig(_ context.Context) ClientConfig {
@@ -267,7 +309,9 @@ func (c *Coordinator) DashboardSnapshot(ctx context.Context) (DashboardSnapshot,
 		return outModels[i].CreatedAt.After(outModels[j].CreatedAt)
 	})
 	outFutures := make([]DashboardFuture, 0, len(futures))
+	var queue QueueState
 	for _, future := range futures {
+		addQueueFuture(&queue, future)
 		outFutures = append(outFutures, dashboardFuture(future))
 	}
 	sort.Slice(outFutures, func(i, j int) bool {
@@ -277,6 +321,7 @@ func (c *Coordinator) DashboardSnapshot(ctx context.Context) (DashboardSnapshot,
 		GeneratedAt:  c.now().UTC(),
 		ClientConfig: c.ClientConfig(ctx),
 		Capabilities: c.Capabilities(ctx),
+		Queue:        queue,
 		Sessions:     outSessions,
 		Models:       outModels,
 		Futures:      outFutures,
@@ -476,38 +521,32 @@ func (c *Coordinator) UnloadModel(ctx context.Context, id string) (Future, error
 }
 
 func (c *Coordinator) Forward(ctx context.Context, req tinkertrain.Request) (Future, error) {
-	out, err := c.train.Forward(ctx, req)
-	if err != nil {
-		return c.UserErrorFuture(ctx, err.Error())
-	}
-	return c.CompleteFuture(ctx, out, map[string]any{
+	return c.EnqueueFuture(ctx, map[string]any{
 		"type":     "forward",
 		"model_id": req.ModelID,
 		"loss_fn":  req.Input.LossFn,
+	}, requestBytes(req), func(ctx context.Context) (any, error) {
+		return c.train.Forward(ctx, req)
 	})
 }
 
 func (c *Coordinator) ForwardBackward(ctx context.Context, req tinkertrain.Request) (Future, error) {
-	out, err := c.train.ForwardBackward(ctx, req)
-	if err != nil {
-		return c.UserErrorFuture(ctx, err.Error())
-	}
-	return c.CompleteFuture(ctx, out, map[string]any{
+	return c.EnqueueFuture(ctx, map[string]any{
 		"type":     "forward_backward",
 		"model_id": req.ModelID,
 		"loss_fn":  req.Input.LossFn,
+	}, requestBytes(req), func(ctx context.Context) (any, error) {
+		return c.train.ForwardBackward(ctx, req)
 	})
 }
 
 func (c *Coordinator) OptimStep(ctx context.Context, modelID string, params tinkertrain.AdamParams) (Future, error) {
-	out, err := c.train.OptimStep(ctx, modelID, params)
-	if err != nil {
-		return c.UserErrorFuture(ctx, err.Error())
-	}
-	return c.CompleteFuture(ctx, out, map[string]any{
+	return c.EnqueueFuture(ctx, map[string]any{
 		"type":          "optim_step",
 		"model_id":      modelID,
 		"learning_rate": params.LearningRate,
+	}, requestBytes(params), func(ctx context.Context) (any, error) {
+		return c.train.OptimStep(ctx, modelID, params)
 	})
 }
 
@@ -738,6 +777,135 @@ func (c *Coordinator) CompleteFuture(ctx context.Context, result any, metadata a
 	return fromDBFuture(future), nil
 }
 
+func (c *Coordinator) EnqueueFuture(ctx context.Context, metadata any, requestBytes int64, run operationFunc) (Future, error) {
+	now := c.now().UTC()
+	id, err := newID("fut")
+	if err != nil {
+		return Future{}, err
+	}
+	metadataJSON, err := marshalRaw(metadata)
+	if err != nil {
+		return Future{}, err
+	}
+	var meta struct {
+		Type    string `json:"type"`
+		ModelID string `json:"model_id"`
+	}
+	_ = json.Unmarshal(metadataJSON, &meta)
+	future := tinkerdb.Future{
+		ID:           id,
+		State:        FutureQueued,
+		Metadata:     metadataJSON,
+		CreatedAt:    now,
+		Operation:    meta.Type,
+		ModelID:      meta.ModelID,
+		RequestBytes: requestBytes,
+	}
+	if err := c.store.PutFuture(ctx, future); err != nil {
+		return Future{}, err
+	}
+	c.startOperation(id, run)
+	return fromDBFuture(future), nil
+}
+
+func (c *Coordinator) startOperation(id string, run operationFunc) {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	c.wg.Add(1)
+	c.mu.Unlock()
+
+	go func() {
+		defer c.wg.Done()
+		c.sem <- struct{}{}
+		defer func() { <-c.sem }()
+		c.runOperation(context.Background(), id, run)
+	}()
+}
+
+func (c *Coordinator) runOperation(ctx context.Context, id string, run operationFunc) {
+	future, err := c.store.GetFuture(ctx, id)
+	if err != nil || future.State != FutureQueued {
+		return
+	}
+	now := c.now().UTC()
+	leaseID, err := newID("lease")
+	if err != nil {
+		_ = c.finishFuture(ctx, future, nil, systemError(err), FutureSystemError)
+		return
+	}
+	future.State = FutureRunning
+	future.StartedAt = now
+	future.LeaseID = leaseID
+	future.LeaseExpiresAt = now.Add(c.leaseTimeout)
+	if err := c.store.PutFuture(ctx, future); err != nil {
+		return
+	}
+	runCtx, cancel := context.WithTimeout(ctx, c.leaseTimeout)
+	defer cancel()
+	result, err := run(runCtx)
+	if err != nil {
+		_ = c.finishFuture(ctx, future, nil, userError(err.Error()), FutureUserError)
+		return
+	}
+	_ = c.finishFuture(ctx, future, result, nil, FutureComplete)
+}
+
+func (c *Coordinator) finishFuture(ctx context.Context, future tinkerdb.Future, result any, errPayload any, state string) error {
+	current, err := c.store.GetFuture(ctx, future.ID)
+	if err == nil && current.State == FutureCanceled && state != FutureCanceled {
+		return nil
+	}
+	now := c.now().UTC()
+	if result != nil {
+		resultJSON, err := marshalRaw(result)
+		if err != nil {
+			return err
+		}
+		future.Result = resultJSON
+		future.ResultBytes = int64(len(resultJSON))
+	}
+	if errPayload != nil {
+		errJSON, err := marshalRaw(errPayload)
+		if err != nil {
+			return err
+		}
+		future.Error = errJSON
+		future.ResultBytes = int64(len(errJSON))
+	}
+	future.State = state
+	future.CompletedAt = now
+	return c.store.PutFuture(ctx, future)
+}
+
+func userError(message string) map[string]any {
+	return map[string]any{"code": "user_error", "message": message}
+}
+
+func systemError(err error) map[string]any {
+	return map[string]any{"code": "system_error", "message": err.Error()}
+}
+
+func (c *Coordinator) recoverRunning(ctx context.Context) {
+	futures, err := c.store.ListFutures(ctx)
+	if err != nil {
+		return
+	}
+	for _, future := range futures {
+		if future.State != FutureRunning {
+			continue
+		}
+		_ = c.finishFuture(ctx, future, nil, map[string]any{
+			"code":    "system_error",
+			"message": "operation lease expired during coordinator restart",
+		}, FutureSystemError)
+	}
+}
+
+func (c *Coordinator) dispatchQueued(context.Context) {}
+
 func (c *Coordinator) UserErrorFuture(ctx context.Context, message string) (Future, error) {
 	now := c.now().UTC()
 	id, err := newID("fut")
@@ -769,6 +937,18 @@ func (c *Coordinator) RetrieveFuture(ctx context.Context, id string, allowMetada
 	if err != nil {
 		return Future{}, err
 	}
+	if future.State == FutureRunning && !future.LeaseExpiresAt.IsZero() && !future.LeaseExpiresAt.After(c.now().UTC()) {
+		if err := c.finishFuture(ctx, future, nil, map[string]any{
+			"code":    "system_error",
+			"message": "operation lease expired",
+		}, FutureSystemError); err != nil {
+			return Future{}, err
+		}
+		future, err = c.store.GetFuture(ctx, id)
+		if err != nil {
+			return Future{}, err
+		}
+	}
 	if allowMetadataOnly && future.State == FutureComplete && len(future.Metadata) > 0 && !future.MetadataDelivered {
 		future.State = FutureCompleteMetadata
 		future.MetadataDelivered = true
@@ -790,14 +970,44 @@ func (c *Coordinator) RetrieveFuture(ctx context.Context, id string, allowMetada
 	return out, nil
 }
 
+func (c *Coordinator) CancelFuture(ctx context.Context, id string) (Future, error) {
+	future, err := c.store.GetFuture(ctx, id)
+	if err != nil {
+		return Future{}, err
+	}
+	switch future.State {
+	case FutureQueued, FutureRunning:
+		if err := c.finishFuture(ctx, future, nil, map[string]any{
+			"code":    "canceled",
+			"message": "operation canceled",
+		}, FutureCanceled); err != nil {
+			return Future{}, err
+		}
+		return c.storeFuture(ctx, id)
+	default:
+		return fromDBFuture(future), nil
+	}
+}
+
+func (c *Coordinator) storeFuture(ctx context.Context, id string) (Future, error) {
+	future, err := c.store.GetFuture(ctx, id)
+	if err != nil {
+		return Future{}, err
+	}
+	return fromDBFuture(future), nil
+}
+
 func dashboardFuture(future tinkerdb.Future) DashboardFuture {
 	out := DashboardFuture{
-		ID:          future.ID,
-		State:       future.State,
-		CreatedAt:   future.CreatedAt,
-		CompletedAt: future.CompletedAt,
-		ResultBytes: len(future.Result),
-		ErrorBytes:  len(future.Error),
+		ID:             future.ID,
+		State:          future.State,
+		CreatedAt:      future.CreatedAt,
+		CompletedAt:    future.CompletedAt,
+		ResultBytes:    len(future.Result),
+		ErrorBytes:     len(future.Error),
+		RequestBytes:   future.RequestBytes,
+		LeaseID:        future.LeaseID,
+		LeaseExpiresAt: future.LeaseExpiresAt,
 	}
 	var meta struct {
 		Type    string `json:"type"`
@@ -837,6 +1047,30 @@ func dashboardFuture(future tinkerdb.Future) DashboardFuture {
 		out.Error = errPayload.Code
 	}
 	return out
+}
+
+func addQueueFuture(q *QueueState, future tinkerdb.Future) {
+	switch future.State {
+	case FutureQueued:
+		q.Queued++
+		q.QueuedBytes += future.RequestBytes
+	case FutureRunning:
+		q.Running++
+		q.RunningBytes += future.RequestBytes
+	case FutureComplete, FutureCompleteMetadata:
+		q.Complete++
+	case FutureUserError:
+		q.UserError++
+	case FutureSystemError:
+		q.SystemError++
+	case FutureCanceled:
+		q.Canceled++
+	}
+	if future.ResultBytes != 0 {
+		q.ResultBytes += future.ResultBytes
+	} else {
+		q.ResultBytes += int64(len(future.Result))
+	}
 }
 
 func inferOperation(metrics MetricMap) string {
@@ -911,6 +1145,14 @@ func marshalRaw(v any) (json.RawMessage, error) {
 		return nil, fmt.Errorf("encode future payload: %w", err)
 	}
 	return b, nil
+}
+
+func requestBytes(v any) int64 {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return 0
+	}
+	return int64(len(b))
 }
 
 func newID(prefix string) (string, error) {

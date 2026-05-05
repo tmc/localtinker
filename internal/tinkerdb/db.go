@@ -47,9 +47,16 @@ type Future struct {
 	Error       json.RawMessage `json:"error_json,omitempty"`
 	Metadata    json.RawMessage `json:"metadata_json,omitempty"`
 	CreatedAt   time.Time       `json:"created_at"`
+	StartedAt   time.Time       `json:"started_at,omitempty"`
 	CompletedAt time.Time       `json:"completed_at,omitempty"`
 
-	MetadataDelivered bool `json:"metadata_delivered,omitempty"`
+	MetadataDelivered bool      `json:"metadata_delivered,omitempty"`
+	Operation         string    `json:"operation,omitempty"`
+	ModelID           string    `json:"model_id,omitempty"`
+	RequestBytes      int64     `json:"request_bytes,omitempty"`
+	ResultBytes       int64     `json:"result_bytes,omitempty"`
+	LeaseID           string    `json:"lease_id,omitempty"`
+	LeaseExpiresAt    time.Time `json:"lease_expires_at,omitempty"`
 }
 
 type Model struct {
