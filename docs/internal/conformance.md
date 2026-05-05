@@ -19,7 +19,7 @@ Tinker SDK when `TINKER_SDK_DIR` is available.
 | Checkpoints | `sdk_smoke.txt` saves, loads, loads optimizer state, lists, archives, publishes, unpublishes, sets TTL, and deletes checkpoints. It also opens the generated archive and checks expected files. | Covered locally |
 | Archives | `internal/tinkerhttp/routes_test.go` covers HTTP archive download URLs, local archive expiration, owner metadata headers, and proxied host headers. | Covered locally |
 | Sampler | `sdk_smoke.txt` saves sampler weights, creates a sampling client, and samples with logprobs, prompt logprobs, seed, temperature, top-p, top-k, and stop settings. `internal/tinkertrain/sample_test.go` covers integer stops, tokenizer-backed string stops, generated token logprobs, and prompt logprobs. | Covered locally |
-| Malformed inputs | `sdk_malformed_inputs.txt` and `sdk_async_errors.txt` verify malformed training and async request errors. | Covered |
+| Malformed inputs | `sdk_malformed_inputs.txt` and `sdk_async_errors.txt` verify malformed training, sparse `TensorData`, and async request errors. | Covered |
 
 Run the local suite with:
 
@@ -154,7 +154,8 @@ limited public beta only if the caveats below are stated plainly.
 | Hosted comparison | No hosted-vs-local JSONL artifact is checked in. | Launch blocker for broad public claims. |
 | Checkpoint downloads | Local HTTP archive URLs and metadata are covered; hosted signed URL and authorization behavior are not matched. | Disclose for beta; blocker for hosted-compatible wording. |
 | Futures and queueing | Local queue, cancellation, panic containment, and unfinished-queue recovery are covered; hosted timing/backpressure is not compared. | Disclose for beta. |
-| Cross-entropy | Dense tensors, invalid weights, and logprobs are covered locally; hosted numeric parity is not recorded. | Disclose for beta. |
+| Cross-entropy | Dense tensors, invalid weights, sparse tensor rejection, and logprobs are covered locally; hosted numeric parity is not recorded. | Disclose for beta. |
+| Custom losses | `ForwardBackwardCustom` is not implemented. | Do not advertise custom loss execution. |
 | Sampling | Generated logprobs, prompt logprobs, deterministic seed flow, and string stops are covered locally; top-k prompt logprobs are not implemented. | Disclose unsupported top-k prompt logprobs. |
 | Packaging | Clean-checkout `GOWORK=off go test ./...` must pass with the intended MLX module graph and native libraries. | Launch blocker until freshly proven. |
 | Secrets and artifacts | No keys, binaries, downloaded weights, generated caches, or private model paths should be staged. | Hard launch gate. |
@@ -169,6 +170,9 @@ limited public beta only if the caveats below are stated plainly.
   has not been compared.
 - Dense cross-entropy and per-token logprobs are local MLX behavior; hosted
   numeric parity has not been recorded.
+- Sparse `TensorData` inputs are rejected; only dense tensor inputs are
+  supported.
+- `ForwardBackwardCustom` is not implemented.
 - Top-k prompt logprobs are not implemented.
 - Optimizer state is stored in local checkpoints, but hosted resume parity has
   not been recorded.
