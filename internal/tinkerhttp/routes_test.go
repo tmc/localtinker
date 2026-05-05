@@ -66,6 +66,62 @@ func TestHandshakeRoutes(t *testing.T) {
 	}
 }
 
+func TestSessionRESTRoutes(t *testing.T) {
+	store := tinkerdb.OpenMemory()
+	c, err := tinkercoord.New(tinkercoord.Config{Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+
+	var created CreateSessionResponse
+	postJSON(t, h, "/api/v1/create_session", nil, &created)
+	if created.SessionID == "" {
+		t.Fatal("empty session_id")
+	}
+	if err := store.PutModel(nil, tinkerdb.Model{
+		ID:          "model-a",
+		SessionID:   created.SessionID,
+		BaseModel:   "Qwen/Qwen3-8B",
+		TokenizerID: "Qwen/Qwen3-8B",
+		IsLoRA:      true,
+		LoRARank:    8,
+		CreatedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var sessions struct {
+		Sessions []string           `json:"sessions"`
+		Cursor   tinkercoord.Cursor `json:"cursor"`
+	}
+	getJSON(t, h, "/api/v1/sessions?limit=1", &sessions)
+	if len(sessions.Sessions) != 1 || sessions.Sessions[0] != created.SessionID {
+		t.Fatalf("sessions = %#v, want %q", sessions, created.SessionID)
+	}
+	if sessions.Cursor.TotalCount != 1 {
+		t.Fatalf("cursor = %#v, want total_count 1", sessions.Cursor)
+	}
+
+	var session struct {
+		TrainingRunIDs []string `json:"training_run_ids"`
+		SamplerIDs     []string `json:"sampler_ids"`
+	}
+	getJSON(t, h, "/api/v1/sessions/"+created.SessionID, &session)
+	if len(session.TrainingRunIDs) != 1 || session.TrainingRunIDs[0] != "model-a" {
+		t.Fatalf("session = %#v, want model-a", session)
+	}
+	if session.SamplerIDs == nil {
+		t.Fatalf("sampler_ids = nil, want empty list")
+	}
+
+	var missing ErrorResponse
+	methodJSON(t, h, http.MethodGet, "/api/v1/sessions/missing", nil, http.StatusNotFound, &missing)
+	if missing.Code != "not_found" {
+		t.Fatalf("missing session response = %#v", missing)
+	}
+}
+
 func TestRequestBodyLimit(t *testing.T) {
 	c, err := tinkercoord.New(tinkercoord.Config{
 		Store:           tinkerdb.OpenMemory(),
@@ -413,6 +469,75 @@ func TestTrainingInputValidationReturnsUserErrors(t *testing.T) {
 				t.Fatalf("error = %v, want containing %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestTrainingInputValidationAcceptsDenseCrossEntropyTensors(t *testing.T) {
+	input := tinkertrain.ForwardBackwardInput{
+		LossFn: "cross_entropy",
+		Data: []tinkertrain.Datum{{
+			ModelInput: tinkertrain.ModelInput{Chunks: []tinkertrain.ModelInputChunk{{
+				Type:   "encoded_text",
+				Tokens: []int{1, 2, 3, 4},
+			}}},
+			LossFnInputs: map[string]tinkertrain.TensorData{
+				"target_tokens": {
+					Data:  []float64{9, 8, 7, 6},
+					DType: "int64",
+					Shape: []int{2, 2},
+				},
+				"weights": {
+					Data:  []float64{1, 0.5, 0, 1},
+					DType: "float32",
+					Shape: []int{2, 2},
+				},
+			},
+		}},
+	}
+
+	if err := normalizeAndValidateInput(&input); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTrainingInputValidationAcceptsDenseCrossEntropy(t *testing.T) {
+	input := tinkertrain.ForwardBackwardInput{
+		LossFn: "cross_entropy",
+		Data: []tinkertrain.Datum{
+			decodeDatum(t, map[string]any{
+				"model_input": map[string]any{
+					"chunks": []any{
+						map[string]any{
+							"type":   "encoded_text",
+							"tokens": []int{10, 11, 12, 13},
+						},
+					},
+				},
+				"loss_fn_inputs": map[string]any{
+					"target_tokens": map[string]any{
+						"data":  []int{30, 31, 32, 33},
+						"dtype": "int64",
+						"shape": []int{2, 2},
+					},
+					"weights": map[string]any{
+						"data":  []float64{0, 0.25, 1, 0.5},
+						"dtype": "float32",
+						"shape": []int{2, 2},
+					},
+				},
+			}),
+		},
+	}
+	if err := normalizeAndValidateInput(&input); err != nil {
+		t.Fatal(err)
+	}
+	target := input.Data[0].LossFnInputs["target_tokens"]
+	if target.DType != "int64" || !sameShape(target.Shape, []int{2, 2}) {
+		t.Fatalf("target tensor = %#v", target)
+	}
+	weight := input.Data[0].LossFnInputs["weights"]
+	if weight.DType != "float32" || !sameShape(weight.Shape, []int{2, 2}) {
+		t.Fatalf("weight tensor = %#v", weight)
 	}
 }
 

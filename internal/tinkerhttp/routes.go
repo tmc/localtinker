@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -51,6 +52,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/weights_info", s.weightsInfo)
 	mux.HandleFunc("GET /api/v1/training_runs", s.trainingRuns)
 	mux.HandleFunc("GET /api/v1/checkpoints", s.checkpoints)
+	mux.HandleFunc("GET /api/v1/sessions", s.sessions)
+	mux.HandleFunc("GET /api/v1/sessions/", s.sessionPath)
 	mux.HandleFunc("GET /api/v1/training_runs/", s.trainingRunPath)
 	mux.HandleFunc("POST /api/v1/training_runs/", s.trainingRunPath)
 	mux.HandleFunc("PUT /api/v1/training_runs/", s.trainingRunPath)
@@ -602,10 +605,23 @@ func normalizeTensorData(name string, tensor tinkertrain.TensorData) (tinkertrai
 		if tensor.DType != "" && tensor.DType != "int64" {
 			return tensor, fmt.Errorf("dtype %q, want int64", tensor.DType)
 		}
+		for i, v := range tensor.Data {
+			if math.Trunc(v) != v {
+				return tensor, fmt.Errorf("data[%d] = %v is not an integer", i, v)
+			}
+			if v < 0 || v > float64(math.MaxInt32) {
+				return tensor, fmt.Errorf("data[%d] = %v is out of range", i, v)
+			}
+		}
 		tensor.DType = "int64"
 	case "weights":
 		if tensor.DType != "" && tensor.DType != "float32" {
 			return tensor, fmt.Errorf("dtype %q, want float32", tensor.DType)
+		}
+		for i, v := range tensor.Data {
+			if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+				return tensor, fmt.Errorf("data[%d] = %v is not a non-negative finite number", i, v)
+			}
 		}
 		tensor.DType = "float32"
 	}
@@ -705,6 +721,76 @@ func (s *Server) checkpoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
+	snapshot, err := s.coord.DashboardSnapshot(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "system_error", err.Error())
+		return
+	}
+	limit := intQuery(r, "limit", 20)
+	offset := intQuery(r, "offset", 0)
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	total := len(snapshot.Sessions)
+	if offset > total {
+		offset = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	ids := make([]string, 0, end-offset)
+	for _, session := range snapshot.Sessions[offset:end] {
+		ids = append(ids, session.ID)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"sessions": ids,
+		"cursor": tinkercoord.Cursor{
+			Offset:     offset,
+			Limit:      limit,
+			TotalCount: total,
+		},
+	})
+}
+
+func (s *Server) sessionPath(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/sessions/")
+	if id == "" || strings.Contains(id, "/") {
+		writeError(w, http.StatusNotFound, "not_found", "unknown session")
+		return
+	}
+	snapshot, err := s.coord.DashboardSnapshot(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "system_error", err.Error())
+		return
+	}
+	found := false
+	for _, session := range snapshot.Sessions {
+		if session.ID == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "not_found", "unknown session")
+		return
+	}
+	modelIDs := make([]string, 0)
+	for _, model := range snapshot.Models {
+		if model.SessionID == id {
+			modelIDs = append(modelIDs, model.ID)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"training_run_ids": modelIDs,
+		"sampler_ids":      []string{},
+	})
 }
 
 func (s *Server) trainingRunPath(w http.ResponseWriter, r *http.Request) {
