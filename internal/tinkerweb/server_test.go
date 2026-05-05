@@ -52,6 +52,16 @@ func TestDashboardRoutes(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "preact") {
 		t.Fatalf("index does not reference preact:\n%s", rec.Body.String())
 	}
+	for _, path := range []string{"/runs", "/checkpoints", "/nodes", "/artifacts"} {
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d", path, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "preact") {
+			t.Fatalf("%s does not serve dashboard index:\n%s", path, rec.Body.String())
+		}
+	}
 
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/web/dashboard", nil))

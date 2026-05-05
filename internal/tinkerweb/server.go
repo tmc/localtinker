@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/tmc/localtinker/internal/tinkercoord"
@@ -37,8 +38,32 @@ func (s *Server) Handler() http.Handler {
 	if err != nil {
 		panic(err)
 	}
-	mux.Handle("/", http.FileServer(http.FS(static)))
+	files := http.FileServer(http.FS(static))
+	mux.Handle("/", dashboardPages(files))
 	return mux
+}
+
+func dashboardPages(files http.Handler) http.Handler {
+	pages := map[string]bool{
+		"/":            true,
+		"/runs":        true,
+		"/checkpoints": true,
+		"/nodes":       true,
+		"/artifacts":   true,
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if pages[r.URL.Path] {
+			r2 := r.Clone(r.Context())
+			r2.URL.Path = "/"
+			files.ServeHTTP(w, r2)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			http.NotFound(w, r)
+			return
+		}
+		files.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {

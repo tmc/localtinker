@@ -220,6 +220,16 @@ func artifactLine(a artifactInfo) string {
 	return fmt.Sprintf("%s %s %s", name, kind, storage)
 }
 
+func dashboardURL(coordinator, path string) string {
+	if path == "" {
+		path = "/"
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return strings.TrimRight(coordinator, "/") + path
+}
+
 func shortHash(s string) string {
 	if len(s) <= 12 {
 		return s
