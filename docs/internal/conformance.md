@@ -11,12 +11,14 @@ Tinker SDK when `TINKER_SDK_DIR` is available.
 | Area | Evidence | Status |
 | --- | --- | --- |
 | Handshake | `sdk_handshake.txt` creates a `ServiceClient`, reads server capabilities, and verifies empty REST run and checkpoint listings. | Covered |
-| Futures | `sdk_handshake.txt` and `sdk_async_errors.txt` verify missing future errors, future id echoing, and user-error futures. | Covered |
+| Sessions | `internal/tinkerhttp/routes_test.go` covers SDK REST session listing and lookup shapes. | Covered locally |
+| Futures | `sdk_handshake.txt`, `sdk_async_errors.txt`, `internal/tinkercoord/coordinator_test.go`, and `internal/tinkerhttp/routes_test.go` verify missing future errors, future id echoing, queue state, cancellation, and user-error futures. | Covered locally |
 | Training | `sdk_smoke.txt` creates a LoRA training client, calls `get_info`, `forward`, `forward_backward`, and `optim_step`, and checks loss decreases. | Covered |
 | Metrics | `sdk_smoke.txt` checks `loss:mean` and that `optimizer_backend:mlx` is reported by an optimizer step. | Covered |
 | Cross-entropy | `internal/tinkertrain/crossentropy_test.go` covers dense target tensors, weighted dense loss, and returned per-token logprobs. | Covered locally |
-| Checkpoints | `sdk_smoke.txt` saves, loads, lists, archives, publishes, unpublishes, sets TTL, and deletes checkpoints. It also opens the generated archive and checks expected files. | Covered locally |
-| Sampler | `sdk_smoke.txt` saves sampler weights, creates a sampling client, and samples one token. `internal/tinkertrain/sample_test.go` covers integer stops, tokenizer-backed string stops, generated token logprobs, and prompt logprobs. | Covered locally |
+| Checkpoints | `sdk_smoke.txt` saves, loads, loads optimizer state, lists, archives, publishes, unpublishes, sets TTL, and deletes checkpoints. It also opens the generated archive and checks expected files. | Covered locally |
+| Archives | `internal/tinkerhttp/routes_test.go` covers local archive expiration and owner metadata headers. | Covered locally |
+| Sampler | `sdk_smoke.txt` saves sampler weights, creates a sampling client, and samples with logprobs, prompt logprobs, seed, temperature, top-p, top-k, and stop settings. `internal/tinkertrain/sample_test.go` covers integer stops, tokenizer-backed string stops, generated token logprobs, and prompt logprobs. | Covered locally |
 | Malformed inputs | `sdk_malformed_inputs.txt` and `sdk_async_errors.txt` verify malformed training and async request errors. | Covered |
 
 Run the local suite with:
@@ -41,17 +43,20 @@ localtinker and record:
 - future request IDs and terminal response shapes
 - loss and optimizer metric names
 - checkpoint path, listing metadata, archive metadata, and download behavior
-- sampler response fields for the same prompt, seed, and sampling parameters
+- sampler response fields for the same prompt, seed, logprob flags, and
+  sampling parameters
 
 ## Known Differences
 
-- Futures complete synchronously today; queue state is only a compatibility
-  response for pending records.
+- Futures have local queue, running, cancellation, and result-byte accounting,
+  but hosted queue timing and backpressure have not been compared.
 - Checkpoint archive URLs are local `file://` URLs, not hosted signed download
   URLs.
-- Checkpoint ownership is recorded as `local` and is not an authorization
-  boundary.
+- Checkpoint ownership is recorded as `local`; hosted authorization behavior
+  has not been compared.
 - Dense cross-entropy and per-token logprobs are local MLX behavior; hosted
   numeric parity has not been recorded.
 - Top-k prompt logprobs are not implemented.
+- Optimizer state is stored in local checkpoints, but hosted resume parity has
+  not been recorded.
 - Hosted and local numeric results are not expected to match exactly.
