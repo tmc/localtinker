@@ -60,6 +60,8 @@ try:
     assert first["sequences"][0]["tokens"] == second["sequences"][0]["tokens"], (first, second)
     assert len(first["sequences"][0]["logprobs"]) == len(first["sequences"][0]["tokens"]), first
     assert len(first["prompt_logprobs"]) == 3, first
+    assert first["prompt_logprobs"][0] is None, first
+    assert all(x is not None for x in first["prompt_logprobs"][1:]), first
     print("SDK_SAMPLING_OK", saved.path)
 finally:
     client.holder.close()
