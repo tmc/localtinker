@@ -42,7 +42,13 @@ type Coordinator struct {
 	sem           chan struct{}
 	wg            sync.WaitGroup
 	mu            sync.Mutex
+	queue         []queuedOperation
 	closed        bool
+}
+
+type queuedOperation struct {
+	id  string
+	run operationFunc
 }
 
 type Config struct {
@@ -834,15 +840,29 @@ func (c *Coordinator) startOperation(id string, run operationFunc) {
 		c.mu.Unlock()
 		return
 	}
-	c.wg.Add(1)
+	c.queue = append(c.queue, queuedOperation{id: id, run: run})
+	c.dispatchLocked()
 	c.mu.Unlock()
+}
 
-	go func() {
-		defer c.wg.Done()
+func (c *Coordinator) dispatchLocked() {
+	for len(c.queue) > 0 && len(c.sem) < cap(c.sem) {
+		op := c.queue[0]
+		copy(c.queue, c.queue[1:])
+		c.queue = c.queue[:len(c.queue)-1]
 		c.sem <- struct{}{}
-		defer func() { <-c.sem }()
-		c.runOperation(context.Background(), id, run)
-	}()
+		c.wg.Add(1)
+		go c.runQueuedOperation(op)
+	}
+}
+
+func (c *Coordinator) runQueuedOperation(op queuedOperation) {
+	defer c.wg.Done()
+	c.runOperation(context.Background(), op.id, op.run)
+	c.mu.Lock()
+	<-c.sem
+	c.dispatchLocked()
+	c.mu.Unlock()
 }
 
 func (c *Coordinator) runOperation(ctx context.Context, id string, run operationFunc) {

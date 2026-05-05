@@ -197,6 +197,60 @@ func TestFutureQueueBoundsConcurrency(t *testing.T) {
 	eventuallyFutureState(t, c, second.ID, FutureComplete)
 }
 
+func TestFutureQueueDispatchesFIFO(t *testing.T) {
+	c, err := New(Config{
+		Store:         tinkerdb.OpenMemory(),
+		MaxOperations: 1,
+		LeaseTimeout:  time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	order := make(chan string, 3)
+	first, err := c.EnqueueFuture(context.Background(), map[string]any{"type": "first"}, 1, func(context.Context) (any, error) {
+		close(firstStarted)
+		<-releaseFirst
+		order <- "first"
+		return map[string]any{"ok": true}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-firstStarted
+	second, err := c.EnqueueFuture(context.Background(), map[string]any{"type": "second"}, 1, func(context.Context) (any, error) {
+		order <- "second"
+		return map[string]any{"ok": true}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := c.EnqueueFuture(context.Background(), map[string]any{"type": "third"}, 1, func(context.Context) (any, error) {
+		order <- "third"
+		return map[string]any{"ok": true}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	close(releaseFirst)
+	for _, want := range []string{"first", "second", "third"} {
+		select {
+		case got := <-order:
+			if got != want {
+				t.Fatalf("dispatch order got %q, want %q", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for %q", want)
+		}
+	}
+	eventuallyFutureState(t, c, first.ID, FutureComplete)
+	eventuallyFutureState(t, c, second.ID, FutureComplete)
+	eventuallyFutureState(t, c, third.ID, FutureComplete)
+}
+
 func TestCancelQueuedFuture(t *testing.T) {
 	c, err := New(Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
