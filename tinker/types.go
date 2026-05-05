@@ -229,7 +229,7 @@ func validateTargetTokens(in LossInput) (int, []int, error) {
 			return 0, nil, errors.New("target tokens are empty")
 		}
 		for _, v := range in.TargetTokensTensor.Data {
-			if v < 0 || math.Trunc(v) != v {
+			if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > float64(math.MaxInt32) || math.Trunc(v) != v {
 				return 0, nil, errors.New("target tokens tensor contains invalid token")
 			}
 		}

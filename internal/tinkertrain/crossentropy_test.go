@@ -88,9 +88,21 @@ func TestDenseCrossEntropyBatchRejectsBadTargetsAndWeights(t *testing.T) {
 			},
 		},
 		{
+			name: "out of range target",
+			edit: func(in *ForwardBackwardInput) {
+				in.Data[0].LossFnInputs["target_tokens"] = TensorData{Data: []float64{float64(math.MaxInt32) + 1, 4}, DType: "int64"}
+			},
+		},
+		{
 			name: "negative weight",
 			edit: func(in *ForwardBackwardInput) {
 				in.Data[0].LossFnInputs["weights"] = TensorData{Data: []float64{1, -1}, DType: "float32"}
+			},
+		},
+		{
+			name: "non finite weight",
+			edit: func(in *ForwardBackwardInput) {
+				in.Data[0].LossFnInputs["weights"] = TensorData{Data: []float64{1, math.Inf(1)}, DType: "float32"}
 			},
 		},
 		{
@@ -106,6 +118,42 @@ func TestDenseCrossEntropyBatchRejectsBadTargetsAndWeights(t *testing.T) {
 			tt.edit(&in)
 			if _, err := newDenseBatch(in); err == nil {
 				t.Fatal("newDenseBatch succeeded, want error")
+			}
+		})
+	}
+}
+
+func TestDenseCrossEntropyBatchShapeTable(t *testing.T) {
+	tests := []struct {
+		name  string
+		shape []int
+	}{
+		{name: "flat", shape: []int{4}},
+		{name: "rectangular", shape: []int{2, 2}},
+		{name: "row", shape: []int{1, 4}},
+		{name: "column", shape: []int{4, 1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := ForwardBackwardInput{
+				LossFn: "cross_entropy",
+				Data: []Datum{{
+					ModelInput: ModelInput{Chunks: []ModelInputChunk{{
+						Type:   "encoded_text",
+						Tokens: []int{10, 11, 12, 13},
+					}}},
+					LossFnInputs: map[string]TensorData{
+						"target_tokens": {Data: []float64{4, 3, 2, 1}, DType: "int64", Shape: tt.shape},
+						"weights":       {Data: []float64{1, 0, 0.5, 2}, DType: "float32", Shape: tt.shape},
+					},
+				}},
+			}
+			batch, err := newDenseBatch(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := batch.rows[0].outputShape; !sameInts(got, tt.shape) {
+				t.Fatalf("output shape = %v, want %v", got, tt.shape)
 			}
 		})
 	}
@@ -163,6 +211,59 @@ func TestDenseCrossEntropyReturnsWeightedLossAndLogprobs(t *testing.T) {
 	wantLoss := (-wantLogprobs[0] - 0.5*wantLogprobs[1]) / 1.5
 	if !near(float64(gotLoss), wantLoss) {
 		t.Fatalf("loss = %v, want %v", gotLoss, wantLoss)
+	}
+}
+
+func TestDenseCrossEntropyShapeErrors(t *testing.T) {
+	logits, err := mlx.FromSlice([]float32{
+		0, 1, 2,
+		2, 0, -2,
+		1, 0, 1,
+		-1, 2, 0,
+		0, 0, 1,
+		1, 1, 0,
+	}, []int{2, 3, 3}, mlx.Float32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logits.Free()
+	targets, err := mlx.FromSlice([]int32{0, 1, 2, 0, 1, 2}, []int{2, 3}, mlx.Int32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer targets.Free()
+	weights, err := mlx.FromSlice([]float32{1, 1, 1, 1, 1, 1}, []int{2, 3}, mlx.Float32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer weights.Free()
+
+	loss, logprobs, err := denseCrossEntropy(logits, targets, weights)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer loss.Free()
+	defer logprobs.Free()
+	if got, want := logprobs.Shape(), []int{2, 3}; !sameInts(got, want) {
+		t.Fatalf("logprobs shape = %v, want %v", got, want)
+	}
+
+	badTargets, err := mlx.FromSlice([]int32{0, 1}, []int{1, 2}, mlx.Int32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer badTargets.Free()
+	if _, _, err := denseCrossEntropy(logits, badTargets, weights); err == nil {
+		t.Fatal("denseCrossEntropy with bad targets succeeded, want error")
+	}
+
+	badWeights, err := mlx.FromSlice([]float32{1, 1}, []int{1, 2}, mlx.Float32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer badWeights.Free()
+	if _, _, err := denseCrossEntropy(logits, targets, badWeights); err == nil {
+		t.Fatal("denseCrossEntropy with bad weights succeeded, want error")
 	}
 }
 
