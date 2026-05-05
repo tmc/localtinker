@@ -2,7 +2,7 @@
 
 Date: 2026-05-05
 Repo: `/Volumes/tmc/go/src/github.com/tmc/localtinker`
-Current HEAD: `544d941 docs: refresh current test evidence`
+Current HEAD: see `git rev-parse --short HEAD`
 Notebook ID: `a912d601-badc-409b-bbdb-daf9316b843b`
 
 Do not push.
@@ -39,9 +39,9 @@ Continue the loop:
 
 Current local tree:
 
-- HEAD: `544d941 docs: refresh current test evidence`
-- Worktree/index were clean before this handoff file was created.
-- This handoff file is intentionally uncommitted unless the user asks otherwise.
+- HEAD: see `git rev-parse --short HEAD`
+- Check `git status --short` before acting.
+- This handoff file is committed; update it only when the workflow materially changes.
 
 Notebook sources before this handoff:
 
