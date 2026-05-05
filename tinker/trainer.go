@@ -39,9 +39,11 @@ type TrainingInfo struct {
 
 // ForwardResult is returned by forward passes.
 type ForwardResult struct {
-	Loss     float32
-	Logprobs [][]float32
-	Metrics  map[string]float64
+	Loss             float32
+	Logprobs         [][]float32
+	LossFnOutputType string
+	LossFnOutputs    []map[string]TensorData
+	Metrics          map[string]float64
 }
 
 // OptimResult is returned by optimizer steps.

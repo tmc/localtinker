@@ -3,6 +3,7 @@ package tinker
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -54,6 +55,146 @@ func TestForwardValidatesBeforeUnsupported(t *testing.T) {
 	_, err = tr.Forward(context.Background(), batch, CrossEntropy{})
 	if !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("Forward valid batch error = %v, want ErrUnsupported", err)
+	}
+}
+
+func TestCrossEntropyAcceptsTensorData(t *testing.T) {
+	batch := []Datum{{
+		Input: FromTokens([]int{10, 11, 12, 13}),
+		LossInput: LossInput{
+			TargetTokensTensor: TensorData{
+				Data:  []float64{42, 7, 42, 9},
+				DType: "int64",
+				Shape: []int{2, 2},
+			},
+			WeightsTensor: TensorData{
+				Data:  []float64{1, 0.5, 0, 2},
+				DType: "float32",
+				Shape: []int{2, 2},
+			},
+		},
+	}}
+	if err := validateBatch(batch, CrossEntropy{}); err != nil {
+		t.Fatalf("validateBatch() = %v, want nil", err)
+	}
+}
+
+func TestCrossEntropyTensorDataValidation(t *testing.T) {
+	valid := func() LossInput {
+		return LossInput{
+			TargetTokensTensor: TensorData{
+				Data:  []float64{1, 2, 3, 4},
+				DType: "int64",
+				Shape: []int{2, 2},
+			},
+		}
+	}
+	tests := []struct {
+		name string
+		edit func(*LossInput)
+		want string
+	}{
+		{
+			name: "infer flat shape",
+			edit: func(in *LossInput) {
+				in.TargetTokensTensor.Shape = nil
+			},
+		},
+		{
+			name: "bad target shape",
+			edit: func(in *LossInput) {
+				in.TargetTokensTensor.Shape = []int{3}
+			},
+			want: "target tokens shape does not match data",
+		},
+		{
+			name: "bad target dtype",
+			edit: func(in *LossInput) {
+				in.TargetTokensTensor.DType = "float32"
+			},
+			want: `target tokens dtype "float32", want int64`,
+		},
+		{
+			name: "fractional target",
+			edit: func(in *LossInput) {
+				in.TargetTokensTensor.Data[1] = 2.5
+			},
+			want: "target tokens tensor contains invalid token",
+		},
+		{
+			name: "sparse target",
+			edit: func(in *LossInput) {
+				in.TargetTokensTensor.SparseCrowIndices = []int{0}
+			},
+			want: "target tokens sparse tensors are not supported",
+		},
+		{
+			name: "bad weight length",
+			edit: func(in *LossInput) {
+				in.WeightsTensor = TensorData{
+					Data:  []float64{1, 1},
+					DType: "float32",
+				}
+			},
+			want: "weights length does not match target tokens",
+		},
+		{
+			name: "bad weight shape",
+			edit: func(in *LossInput) {
+				in.WeightsTensor = TensorData{
+					Data:  []float64{1, 1, 1, 1},
+					DType: "float32",
+					Shape: []int{4},
+				}
+			},
+			want: "weights shape does not match target tokens",
+		},
+		{
+			name: "bad weight dtype",
+			edit: func(in *LossInput) {
+				in.WeightsTensor = TensorData{
+					Data:  []float64{1, 1, 1, 1},
+					DType: "float64",
+					Shape: []int{2, 2},
+				}
+			},
+			want: `weights dtype "float64", want float32`,
+		},
+		{
+			name: "legacy and tensor target",
+			edit: func(in *LossInput) {
+				in.TargetTokens = []int{1, 2, 3, 4}
+			},
+			want: "target tokens and target tokens tensor are both set",
+		},
+		{
+			name: "input target length mismatch",
+			edit: func(in *LossInput) {
+				in.TargetTokensTensor.Data = []float64{1, 2, 3}
+				in.TargetTokensTensor.Shape = []int{3}
+			},
+			want: "input tokens length does not match target tokens",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := valid()
+			tt.edit(&in)
+			batch := []Datum{{
+				Input:     FromTokens([]int{10, 11, 12, 13}),
+				LossInput: in,
+			}}
+			err := validateBatch(batch, CrossEntropy{})
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("validateBatch() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("validateBatch() = %v, want containing %q", err, tt.want)
+			}
+		})
 	}
 }
 
