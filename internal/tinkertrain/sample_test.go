@@ -74,6 +74,23 @@ func TestStopTokenSequencesStringRequiresTokenizer(t *testing.T) {
 	}
 }
 
+func TestSampleOutputPromptLogprobsMarshalNull(t *testing.T) {
+	value := 1.25
+	out := SampleOutput{
+		Type:           "sample",
+		Sequences:      []SampledSequence{{StopReason: "length", Tokens: []int{1}, Logprobs: []float64{-0.5}}},
+		PromptLogprobs: []*float64{nil, &value},
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `"prompt_logprobs":[null,1.25]`
+	if !strings.Contains(string(data), want) {
+		t.Fatalf("json = %s, want %s", data, want)
+	}
+}
+
 func TestSampleDeterministicSmallCachedModel(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping model smoke in short mode")
@@ -117,6 +134,14 @@ func TestSampleDeterministicSmallCachedModel(t *testing.T) {
 	}
 	if len(first.PromptLogprobs) != 3 {
 		t.Fatalf("prompt logprobs = %v, want 3 values", first.PromptLogprobs)
+	}
+	if first.PromptLogprobs[0] != nil {
+		t.Fatalf("prompt logprobs[0] = %v, want nil", *first.PromptLogprobs[0])
+	}
+	for i, logprob := range first.PromptLogprobs[1:] {
+		if logprob == nil {
+			t.Fatalf("prompt logprobs[%d] = nil, want value", i+1)
+		}
 	}
 }
 

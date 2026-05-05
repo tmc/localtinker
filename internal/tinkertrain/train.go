@@ -103,7 +103,7 @@ type SamplingParams struct {
 type SampleOutput struct {
 	Type           string            `json:"type"`
 	Sequences      []SampledSequence `json:"sequences"`
-	PromptLogprobs []float64         `json:"prompt_logprobs,omitempty"`
+	PromptLogprobs []*float64        `json:"prompt_logprobs,omitempty"`
 }
 
 type SampledSequence struct {

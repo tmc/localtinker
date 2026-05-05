@@ -411,12 +411,11 @@ func sampleToken(ctx context.Context, logits *mlx.Array, params SamplingParams, 
 	return v, nil
 }
 
-func (m *mlxModel) tokenLogprobs(ctx context.Context, tokens []int) ([]float64, error) {
+func (m *mlxModel) tokenLogprobs(ctx context.Context, tokens []int) ([]*float64, error) {
 	if len(tokens) == 0 {
 		return nil, nil
 	}
-	out := make([]float64, len(tokens))
-	out[0] = 0
+	out := make([]*float64, len(tokens))
 	for i := 1; i < len(tokens); i++ {
 		logits, err := m.logits(ctx, tokens[:i])
 		if err != nil {
@@ -431,7 +430,7 @@ func (m *mlxModel) tokenLogprobs(ctx context.Context, tokens []int) ([]float64, 
 		if token < 0 || token >= len(logprobs) {
 			return nil, fmt.Errorf("token %d outside vocab %d", token, len(logprobs))
 		}
-		out[i] = logprobs[token]
+		out[i] = &logprobs[token]
 	}
 	return out, nil
 }
