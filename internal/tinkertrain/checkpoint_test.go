@@ -44,20 +44,9 @@ func TestCheckpointArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	tr := tar.NewReader(f)
-	seen := make(map[string]bool)
-	for {
-		hdr, err := tr.Next()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			t.Fatal(err)
-		}
-		seen[hdr.Name] = true
-	}
+	seen := readArchive(t, f)
 	for name := range files {
-		if !seen[name] {
+		if seen[name] != files[name] {
 			t.Fatalf("archive missing %q; saw %#v", name, seen)
 		}
 	}
@@ -92,24 +81,13 @@ func TestSamplerCheckpointArchiveOmitsOptimizerState(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	tr := tar.NewReader(f)
-	seen := make(map[string]bool)
-	for {
-		hdr, err := tr.Next()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			t.Fatal(err)
-		}
-		seen[hdr.Name] = true
-	}
+	seen := readArchive(t, f)
 	for name := range files {
-		if !seen[name] {
+		if seen[name] != files[name] {
 			t.Fatalf("archive missing %q; saw %#v", name, seen)
 		}
 	}
-	if seen[checkpointOptimizerFile] {
+	if _, ok := seen[checkpointOptimizerFile]; ok {
 		t.Fatalf("sampler archive unexpectedly included %q", checkpointOptimizerFile)
 	}
 }
@@ -122,6 +100,8 @@ func TestOptimizerStateRoundTrip(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
+	// localtinker currently persists scalar resume metadata for the optimizer.
+	// It does not claim to serialize MLX Adam moment tensors.
 	state := optimizerState{
 		Format:    "localtinker.optimizer",
 		Version:   1,
@@ -169,6 +149,16 @@ func TestManagerLoadStateWithOptimizer(t *testing.T) {
 	if !model.loadedOptimizer {
 		t.Fatal("optimizer state was not requested")
 	}
+	if err := m.LoadState(context.Background(), "m", "tinker://m/weights/ckpt"); err != nil {
+		t.Fatal(err)
+	}
+	if model.loadedOptimizer {
+		t.Fatal("plain LoadState requested optimizer state")
+	}
+	model.loadErr = os.ErrNotExist
+	if err := m.LoadStateWithOptimizer(context.Background(), "m", "tinker://m/weights/ckpt", true); err == nil {
+		t.Fatal("LoadStateWithOptimizer swallowed load error")
+	}
 }
 
 func TestCheckpointMetadataJSON(t *testing.T) {
@@ -201,6 +191,7 @@ func TestCheckpointMetadataJSON(t *testing.T) {
 
 type fakeTrainModel struct {
 	loadedOptimizer bool
+	loadErr         error
 }
 
 func (*fakeTrainModel) forwardBackward(context.Context, ForwardBackwardInput, bool) (ForwardBackwardOutput, error) {
@@ -217,7 +208,7 @@ func (*fakeTrainModel) saveState(context.Context, string) (string, error) {
 
 func (m *fakeTrainModel) loadState(_ context.Context, _ string, optimizer bool) error {
 	m.loadedOptimizer = optimizer
-	return nil
+	return m.loadErr
 }
 
 func (*fakeTrainModel) saveForSampler(context.Context, string) (string, error) {
@@ -226,4 +217,32 @@ func (*fakeTrainModel) saveForSampler(context.Context, string) (string, error) {
 
 func (*fakeTrainModel) sample(context.Context, SampleRequest) (SampleOutput, error) {
 	return SampleOutput{}, nil
+}
+
+func readArchive(t *testing.T, f *os.File) map[string]string {
+	t.Helper()
+
+	tr := tar.NewReader(f)
+	seen := make(map[string]string)
+	for {
+		hdr, err := tr.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Fatal(err)
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			t.Fatalf("archive entry %q type = %d, want regular file", hdr.Name, hdr.Typeflag)
+		}
+		if filepath.Clean(hdr.Name) != hdr.Name || filepath.IsAbs(hdr.Name) || hdr.Name == "." || hdr.Name == ".." {
+			t.Fatalf("archive entry has unsafe path %q", hdr.Name)
+		}
+		data, err := io.ReadAll(tr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen[hdr.Name] = string(data)
+	}
+	return seen
 }
