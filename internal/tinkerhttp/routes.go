@@ -55,6 +55,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/checkpoints", s.checkpoints)
 	mux.HandleFunc("GET /api/v1/sessions", s.sessions)
 	mux.HandleFunc("GET /api/v1/sessions/", s.sessionPath)
+	mux.HandleFunc("GET /api/v1/samplers/", s.samplerPath)
 	mux.HandleFunc("GET /api/v1/training_runs/", s.trainingRunPath)
 	mux.HandleFunc("POST /api/v1/training_runs/", s.trainingRunPath)
 	mux.HandleFunc("PUT /api/v1/training_runs/", s.trainingRunPath)
@@ -805,6 +806,19 @@ func (s *Server) sessionPath(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"training_run_ids": modelIDs,
 		"sampler_ids":      []string{},
+	})
+}
+
+func (s *Server) samplerPath(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/samplers/")
+	if id == "" || strings.Contains(id, "/") {
+		writeError(w, http.StatusNotFound, "not_found", "unknown sampler")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"sampler_id": id,
+		"base_model": "Qwen/Qwen3-8B",
+		"model_path": nil,
 	})
 }
 
