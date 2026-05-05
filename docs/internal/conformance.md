@@ -162,7 +162,7 @@ limited public beta only if the caveats below are stated plainly.
 | Cross-entropy | Dense tensors, invalid weights, sparse tensor rejection, and logprobs are covered locally. `hosted comparison fixture` records matching hosted/local per-token logprob shapes and a forward loss mean difference. | Beta-ready with numeric caveats. |
 | Custom losses | `hosted comparison fixture` records hosted and local `forward_backward_custom` success and `custom_loss:mean` metric shape evidence. | Beta-ready with numeric caveats. |
 | Sampling | Generated logprobs, prompt logprobs, deterministic seed flow, string stops, and top-k prompt logprob shapes are covered locally and in hosted comparison rows. | Beta-ready with numeric/distribution caveats. |
-| Packaging | Clean-checkout `GOWORK=off go test ./...` must pass with the intended MLX module graph and native libraries. | Launch blocker until freshly proven. |
+| Packaging | Clean-checkout `GOCACHE=/tmp/localtinker-gocache.AsjiEe GOWORK=off go test ./...` passed at `369a63f`. | Beta-ready; rerun before any release commit. |
 | Secrets and artifacts | No keys, binaries, downloaded weights, generated caches, or private model paths should be staged. | Hard launch gate. |
 
 ## Known Differences
