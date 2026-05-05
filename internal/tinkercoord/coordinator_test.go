@@ -206,6 +206,27 @@ func TestRunningFutureLeaseExpiry(t *testing.T) {
 	}
 }
 
+func TestOperationPanicBecomesSystemErrorFuture(t *testing.T) {
+	c, err := New(Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	future, err := c.EnqueueFuture(context.Background(),
+		map[string]any{"type": "forward", "model_id": "model-a"},
+		1,
+		func(context.Context) (any, error) {
+			panic("boom")
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := eventuallyFutureState(t, c, future.ID, FutureSystemError)
+	if len(got.Error) == 0 {
+		t.Fatal("system error future has no error payload")
+	}
+}
+
 func TestDashboardSnapshotFutureDetails(t *testing.T) {
 	c, err := New(Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {

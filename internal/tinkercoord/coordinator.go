@@ -865,6 +865,14 @@ func (c *Coordinator) runOperation(ctx context.Context, id string, run operation
 	}
 	runCtx, cancel := context.WithTimeout(ctx, c.leaseTimeout)
 	defer cancel()
+	defer func() {
+		if r := recover(); r != nil {
+			_ = c.finishFuture(ctx, future, nil, map[string]any{
+				"code":    "system_error",
+				"message": fmt.Sprintf("operation panic: %v", r),
+			}, FutureSystemError)
+		}
+	}()
 	result, err := run(runCtx)
 	if err != nil {
 		_ = c.finishFuture(ctx, future, nil, userError(err.Error()), FutureUserError)
