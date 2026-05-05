@@ -20,6 +20,64 @@ It includes:
   default SDK example uses `Qwen/Qwen3-8B`, mapped locally to
   `mlx-community/Qwen3-8B-4bit`.
 
+## First 10 minutes
+
+Build the local runner:
+
+```sh
+go build -o /tmp/localtinker ./cmd/localtinker
+```
+
+Start it on localhost:
+
+```sh
+/tmp/localtinker serve \
+  -addr 127.0.0.1:8080 \
+  -home /tmp/localtinker-home
+```
+
+In another shell, point the Tinker SDK at the local runner:
+
+```sh
+export TINKER_SDK_DIR=$HOME/go/src/github.com/thinking-machines-lab/tinker
+export PYTHONPATH=$TINKER_SDK_DIR/src
+export TINKER_BASE_URL=http://127.0.0.1:8080
+export TINKER_API_KEY=tml-local-test
+```
+
+If your SDK virtualenv is elsewhere, set `LOCALTINKER_SDK_PYTHON`:
+
+```sh
+export LOCALTINKER_SDK_PYTHON=/path/to/python
+```
+
+Run the SDK smoke suite:
+
+```sh
+go test ./cmd/localtinker -run TestPythonSDKScript -count=1
+```
+
+Run a minimal SDK training job:
+
+```sh
+${LOCALTINKER_SDK_PYTHON:-$TINKER_SDK_DIR/.venv/bin/python} \
+  ./cmd/localtinker/examples/tinker_job.py --preset short
+```
+
+Open the dashboard:
+
+```text
+http://127.0.0.1:8080/
+```
+
+Use `/runs` for run summaries, `/checkpoints` for local checkpoint paths,
+`/nodes` for node health, and `/artifacts` for artifact state.
+
+Beta limits: local checkpoint archive URLs are `file://` URLs, hosted
+authorization behavior is not reproduced, hosted numeric parity is not
+recorded, top-k prompt logprobs are not implemented, and model execution
+depends on local MLX libraries plus a cached mapped base model.
+
 ## Start localtinker
 
 Run the coordinator from this repository:
