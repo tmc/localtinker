@@ -55,6 +55,8 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
 - SDK conformance coverage includes handshake, empty REST listings, missing
   future errors, malformed training and async inputs, future id echoing, and a
   full MLX smoke workflow.
+- `docs/internal/conformance.md` records the local SDK conformance coverage and
+  hosted-comparison gaps.
 
 ## 1. SDK Conformance
 
@@ -177,7 +179,7 @@ Goal: keep local behavior honest against hosted Tinker.
 - Run the same SDK script against localtinker.
 - Compare response shapes, metric names, checkpoint metadata, and sampler
   behavior.
-- Track differences in a conformance report.
+- Track differences in `docs/internal/conformance.md`.
 
 ## Known Gaps
 
