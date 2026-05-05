@@ -113,14 +113,22 @@ func (s snapshot) title(nodeID string) string {
 		if n.ActiveLeases > 0 {
 			return fmt.Sprintf("T%d", n.ActiveLeases)
 		}
+		if n.QueuedOps > 0 {
+			return fmt.Sprintf("Tq%d", n.QueuedOps)
+		}
 		return "T"
 	}
 	active := int32(0)
+	queued := int32(0)
 	for _, n := range s.Nodes {
 		active += n.ActiveLeases
+		queued += n.QueuedOps
 	}
 	if active > 0 {
 		return fmt.Sprintf("T%d", active)
+	}
+	if queued > 0 {
+		return fmt.Sprintf("Tq%d", queued)
 	}
 	if len(s.Nodes) == 0 {
 		return "T0"
@@ -142,6 +150,10 @@ func (s snapshot) tooltip(nodeID string) string {
 		}
 	} else {
 		lines = append(lines, fmt.Sprintf("%d nodes, %d artifacts", len(s.Nodes), len(s.Artifacts)))
+		active, queued := s.loadTotals()
+		if active > 0 || queued > 0 {
+			lines = append(lines, fmt.Sprintf("%d active leases, %d queued operations", active, queued))
+		}
 	}
 	if !s.CheckedAt.IsZero() {
 		lines = append(lines, "checked "+s.CheckedAt.Format(time.Kitchen))
@@ -156,6 +168,16 @@ func (s snapshot) node(id string) (nodeInfo, bool) {
 		}
 	}
 	return nodeInfo{}, false
+}
+
+func (s snapshot) loadTotals() (int32, int32) {
+	active := int32(0)
+	queued := int32(0)
+	for _, n := range s.Nodes {
+		active += n.ActiveLeases
+		queued += n.QueuedOps
+	}
+	return active, queued
 }
 
 func (s snapshot) menuLines(nodeID string) []string {
@@ -176,6 +198,8 @@ func (s snapshot) menuLines(nodeID string) []string {
 		}
 	} else {
 		lines = append(lines, fmt.Sprintf("Nodes: %d", len(s.Nodes)))
+		active, queued := s.loadTotals()
+		lines = append(lines, fmt.Sprintf("Load: %d active leases, %d queued operations", active, queued))
 		for _, n := range s.Nodes {
 			lines = append(lines, "  "+nodeLine(n))
 		}

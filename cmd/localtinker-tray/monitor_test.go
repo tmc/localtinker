@@ -18,7 +18,9 @@ func TestSnapshotTitle(t *testing.T) {
 		{name: "empty", s: snapshot{}, want: "T0"},
 		{name: "nodes", s: snapshot{Nodes: []nodeInfo{{ID: "a"}, {ID: "b"}}}, want: "T2"},
 		{name: "active leases", s: snapshot{Nodes: []nodeInfo{{ID: "a", ActiveLeases: 2}, {ID: "b", ActiveLeases: 3}}}, want: "T5"},
+		{name: "queued operations", s: snapshot{Nodes: []nodeInfo{{ID: "a", QueuedOps: 2}, {ID: "b", QueuedOps: 3}}}, want: "Tq5"},
 		{name: "named node", nodeID: "a", s: snapshot{Nodes: []nodeInfo{{ID: "a", ActiveLeases: 4}}}, want: "T4"},
+		{name: "named node queued", nodeID: "a", s: snapshot{Nodes: []nodeInfo{{ID: "a", QueuedOps: 4}}}, want: "Tq4"},
 		{name: "missing node", nodeID: "a", s: snapshot{Nodes: []nodeInfo{{ID: "b"}}}, want: "T?"},
 	}
 	for _, tt := range tests {
@@ -48,6 +50,7 @@ func TestSnapshotMenuLines(t *testing.T) {
 	got := strings.Join(s.menuLines(""), "\n")
 	for _, want := range []string{
 		"Coordinator: http://127.0.0.1:8080",
+		"Load: 1 active leases, 2 queued operations",
 		"mac-studio ready leases=1 queue=2 mem=64.0GB temp=48.5C",
 		"Artifacts: 1",
 		"qwen model hf-cache",

@@ -39,6 +39,24 @@ Open the dashboard at:
 http://127.0.0.1:8080/
 ```
 
+For a multi-process local demo, start a node with an artifact peer address:
+
+```sh
+go run ./cmd/localtinker-node run \
+  -coordinator http://127.0.0.1:8080 \
+  -peer-addr 127.0.0.1:8091 \
+  -root .localtinker-node
+```
+
+On macOS, start the menu bar monitor in another shell:
+
+```sh
+go run ./cmd/localtinker-tray -coordinator http://127.0.0.1:8080
+```
+
+The dashboard pages at `/runs`, `/checkpoints`, `/nodes`, and `/artifacts`
+show the same live coordinator snapshot with sections ordered for operators.
+
 ## Point the Tinker SDK at localtinker
 
 In another shell, point SDK jobs at the local endpoint:
