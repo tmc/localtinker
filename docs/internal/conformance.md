@@ -46,6 +46,31 @@ localtinker and record:
 - sampler response fields for the same prompt, seed, logprob flags, and
   sampling parameters
 
+Record each run as JSONL so shape comparisons can be reviewed without replaying
+the job. Each line should include:
+
+```
+{"backend":"hosted|local","event":"capabilities|future|metrics|checkpoint|sampler","payload":{}}
+```
+
+Required events:
+
+- `capabilities`: supported model name, tokenizer ID, and advertised feature
+  names.
+- `future`: operation name, request ID, future ID, terminal category, terminal
+  state, and top-level response keys.
+- `metrics`: operation name and sorted metric keys; keep numeric values for
+  loss and optimizer metrics.
+- `checkpoint`: tinker path, checkpoint type, owner, visibility, expiration,
+  archive URL scheme, archive metadata headers, and downloaded file names.
+- `sampler`: prompt tokens, generated tokens, stop reason, sequence logprob
+  shape, prompt logprob shape, seed, temperature, top-p, top-k, and stop input.
+
+The comparison passes only when required response keys and advertised feature
+flags match the supported local surface. Numeric values may differ, but metric
+names and tensor/logprob shapes should match unless the difference is recorded
+below.
+
 ## Known Differences
 
 - Futures have local queue, running, cancellation, and result-byte accounting,
