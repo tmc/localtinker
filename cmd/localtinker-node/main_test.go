@@ -196,6 +196,28 @@ func TestCacheImportPublishAndSync(t *testing.T) {
 	}
 }
 
+func TestStartArtifactPeerServesNodeHealth(t *testing.T) {
+	store, err := tinkerartifact.OpenStore(filepath.Join(t.TempDir(), "store"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := tinkernode.NewRuntime("node-1")
+	url, closePeer, err := startArtifactPeer("127.0.0.1:0", "", store, runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closePeer()
+
+	client := tinkerv1connect.NewTinkerNodeClient(http.DefaultClient, url)
+	resp, err := client.Health(context.Background(), connect.NewRequest(&tinkerv1.NodeHealthRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Msg.GetNodeId() != "node-1" || resp.Msg.GetState() != tinkernode.NodeStateHealthy {
+		t.Fatalf("health = %+v", resp.Msg)
+	}
+}
+
 func testStoreWithArtifacts(t *testing.T, files map[string]string) (*tinkerartifact.Store, map[string]string) {
 	t.Helper()
 	store, err := tinkerartifact.OpenStore(filepath.Join(t.TempDir(), "artifact-store"))
