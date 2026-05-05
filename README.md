@@ -91,3 +91,22 @@ user errors instead of silently falling back to the hosted service.
 ```sh
 go test ./...
 ```
+
+For a clean-checkout release gate, run without any local workspace overrides:
+
+```sh
+GOWORK=off go test ./...
+```
+
+Release builds are ordinary Go builds:
+
+```sh
+GOWORK=off go build ./cmd/localtinker
+GOWORK=off go build ./cmd/localtinker-node
+GOOS=darwin GOWORK=off go build ./cmd/localtinker-tray
+```
+
+The MLX runtime must be installed or `MLX_LIB_PATH` must point at a directory
+containing `libmlxc.dylib`. SDK smoke tests also need a Python environment with
+the Tinker SDK installed, and model runs need the mapped base model in the local
+Hugging Face or MLX cache.
