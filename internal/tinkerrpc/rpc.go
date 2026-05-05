@@ -28,6 +28,12 @@ const (
 	nodeHealthy  = "healthy"
 	nodeDraining = "draining"
 	nodeDrained  = "drained"
+
+	operationQueued   = "queued"
+	operationLeased   = "leased"
+	operationRunning  = "running"
+	operationComplete = "complete"
+	operationFailed   = "failed"
 )
 
 type Server struct {
@@ -40,6 +46,11 @@ type Server struct {
 	manifests          map[string]*tinkerv1.Manifest
 	aliases            map[string]string
 	prewarmAssignments map[string]string
+	operations         map[string]*operationState
+	operationQueue     []string
+	leaseTimeout       time.Duration
+	now                func() time.Time
+	nextSeq            int64
 }
 
 type nodeState struct {
@@ -52,10 +63,31 @@ type nodeState struct {
 	artifacts   map[string]*tinkerv1.ArtifactInventory
 }
 
+type operationState struct {
+	id            string
+	kind          string
+	payloadJSON   []byte
+	model         *tinkerv1.ModelRef
+	state         string
+	nodeID        string
+	commandID     string
+	leaseID       string
+	createdAt     time.Time
+	leasedAt      time.Time
+	startedAt     time.Time
+	completedAt   time.Time
+	deadline      time.Time
+	ackPending    bool
+	attempts      int
+	lastErrorCode string
+	lastError     string
+}
+
 type Snapshot struct {
-	CoordinatorID string             `json:"coordinator_id"`
-	Nodes         []NodeSnapshot     `json:"nodes"`
-	Artifacts     []ArtifactSnapshot `json:"artifacts"`
+	CoordinatorID string              `json:"coordinator_id"`
+	Nodes         []NodeSnapshot      `json:"nodes"`
+	Artifacts     []ArtifactSnapshot  `json:"artifacts"`
+	Operations    []OperationSnapshot `json:"operations"`
 }
 
 type NodeSnapshot struct {
@@ -75,6 +107,20 @@ type ArtifactSnapshot struct {
 	Alias    string `json:"alias,omitempty"`
 }
 
+type OperationSnapshot struct {
+	OperationID   string    `json:"operation_id"`
+	Kind          string    `json:"kind"`
+	State         string    `json:"state"`
+	NodeID        string    `json:"node_id,omitempty"`
+	LeaseID       string    `json:"lease_id,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	Deadline      time.Time `json:"deadline,omitempty"`
+	Attempts      int       `json:"attempts"`
+	AckPending    bool      `json:"ack_pending,omitempty"`
+	LastErrorCode string    `json:"last_error_code,omitempty"`
+	LastError     string    `json:"last_error,omitempty"`
+}
+
 func New(coord *tinkercoord.Coordinator) (*Server, error) {
 	if coord == nil {
 		return nil, errors.New("nil coordinator")
@@ -90,6 +136,9 @@ func New(coord *tinkercoord.Coordinator) (*Server, error) {
 		manifests:          make(map[string]*tinkerv1.Manifest),
 		aliases:            make(map[string]string),
 		prewarmAssignments: make(map[string]string),
+		operations:         make(map[string]*operationState),
+		leaseTimeout:       30 * time.Second,
+		now:                time.Now,
 	}, nil
 }
 
@@ -130,7 +179,57 @@ func (s *Server) Snapshot() Snapshot {
 			Alias:    aliasForRoot(s.aliases, root),
 		})
 	}
+	operationIDs := make([]string, 0, len(s.operations))
+	for id := range s.operations {
+		operationIDs = append(operationIDs, id)
+	}
+	sort.Strings(operationIDs)
+	for _, id := range operationIDs {
+		op := s.operations[id]
+		out.Operations = append(out.Operations, OperationSnapshot{
+			OperationID:   op.id,
+			Kind:          op.kind,
+			State:         op.state,
+			NodeID:        op.nodeID,
+			LeaseID:       op.leaseID,
+			CreatedAt:     op.createdAt,
+			Deadline:      op.deadline,
+			Attempts:      op.attempts,
+			AckPending:    op.ackPending,
+			LastErrorCode: op.lastErrorCode,
+			LastError:     op.lastError,
+		})
+	}
 	return out
+}
+
+// EnqueueOperation queues a node operation for assignment by Watch.
+func (s *Server) EnqueueOperation(kind string, payloadJSON []byte, model *tinkerv1.ModelRef) (string, error) {
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		return "", errors.New("missing operation kind")
+	}
+	id, err := newID("op")
+	if err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var modelCopy *tinkerv1.ModelRef
+	if model != nil {
+		modelCopy = proto.Clone(model).(*tinkerv1.ModelRef)
+	}
+	op := &operationState{
+		id:          id,
+		kind:        kind,
+		payloadJSON: append([]byte(nil), payloadJSON...),
+		model:       modelCopy,
+		state:       operationQueued,
+		createdAt:   s.now().UTC(),
+	}
+	s.operations[id] = op
+	s.operationQueue = append(s.operationQueue, id)
+	return id, nil
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
@@ -336,31 +435,162 @@ func (s *Server) Watch(ctx context.Context, req *connect.Request[tinkerv1.WatchR
 
 func (s *Server) watchCommand(nodeID string) (*tinkerv1.NodeCommand, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expireOperationLeasesLocked()
 	node := s.nodes[nodeID]
 	if node == nil {
-		s.mu.Unlock()
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("unknown node"))
 	}
 	state := node.state
 	reason := node.drainReason
-	s.mu.Unlock()
 
-	if state != nodeDraining && state != nodeDrained {
-		return nil, nil
+	if state == nodeHealthy {
+		if cmd := s.ackOperationCommandLocked(nodeID); cmd != nil {
+			return cmd, nil
+		}
+		return s.runOperationCommandLocked(nodeID)
 	}
 	if reason == "" {
 		reason = "admin requested drain"
 	}
-	now := time.Now().UTC()
+	now := s.now().UTC()
 	return &tinkerv1.NodeCommand{
 		CommandId:        "drain-" + nodeID,
 		Kind:             "drain",
-		SeqId:            now.UnixNano(),
+		SeqId:            s.nextSeqLocked(),
 		DeadlineUnixNano: now.Add(30 * time.Second).UnixNano(),
 		Directive: &tinkerv1.NodeCommand_Drain{
 			Drain: &tinkerv1.DrainLease{Reason: reason, Checkpoint: true},
 		},
 	}, nil
+}
+
+func (s *Server) ackOperationCommandLocked(nodeID string) *tinkerv1.NodeCommand {
+	var operationIDs []string
+	for _, op := range s.operations {
+		if op.nodeID == nodeID && op.ackPending {
+			operationIDs = append(operationIDs, op.id)
+			op.ackPending = false
+		}
+	}
+	if len(operationIDs) == 0 {
+		return nil
+	}
+	sort.Strings(operationIDs)
+	now := s.now().UTC()
+	seq := s.nextSeqLocked()
+	return &tinkerv1.NodeCommand{
+		CommandId:        "ack-" + nodeID + "-" + strconv.FormatInt(seq, 10),
+		Kind:             "ack_operation",
+		SeqId:            seq,
+		DeadlineUnixNano: now.Add(30 * time.Second).UnixNano(),
+		Directive: &tinkerv1.NodeCommand_AckOperation{
+			AckOperation: &tinkerv1.AcknowledgeOperation{OperationIds: operationIDs},
+		},
+	}
+}
+
+func (s *Server) runOperationCommandLocked(nodeID string) (*tinkerv1.NodeCommand, error) {
+	if !s.nodeCanRunLocked(nodeID) || s.bestRunNodeLocked() != nodeID {
+		return nil, nil
+	}
+	for len(s.operationQueue) > 0 {
+		id := s.operationQueue[0]
+		s.operationQueue = s.operationQueue[1:]
+		op := s.operations[id]
+		if op == nil || op.state != operationQueued {
+			continue
+		}
+		commandID, err := newID("cmd")
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+		leaseID, err := newID("lease")
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+		now := s.now().UTC()
+		op.state = operationLeased
+		op.nodeID = nodeID
+		op.commandID = commandID
+		op.leaseID = leaseID
+		op.leasedAt = now
+		op.deadline = now.Add(s.leaseTimeout)
+		op.attempts++
+		return &tinkerv1.NodeCommand{
+			CommandId:        commandID,
+			LeaseId:          leaseID,
+			OperationId:      op.id,
+			Kind:             op.kind,
+			SeqId:            s.nextSeqLocked(),
+			DeadlineUnixNano: op.deadline.UnixNano(),
+			PayloadJson:      append([]byte(nil), op.payloadJSON...),
+			Model:            cloneModelRef(op.model),
+			Directive: &tinkerv1.NodeCommand_Run{
+				Run: &tinkerv1.RunOperation{},
+			},
+		}, nil
+	}
+	return nil, nil
+}
+
+func (s *Server) nodeCanRunLocked(nodeID string) bool {
+	node := s.nodes[nodeID]
+	return node != nil && node.state == nodeHealthy
+}
+
+func (s *Server) bestRunNodeLocked() string {
+	counts := s.operationAssignmentCountsLocked()
+	var bestID string
+	var bestNode *nodeState
+	for id, node := range s.nodes {
+		if !s.nodeCanRunLocked(id) {
+			continue
+		}
+		if bestID == "" || lessLoadedNode(id, node, counts[id], bestID, bestNode, counts[bestID]) {
+			bestID, bestNode = id, node
+		}
+	}
+	return bestID
+}
+
+func (s *Server) operationAssignmentCountsLocked() map[string]int {
+	counts := make(map[string]int)
+	for _, op := range s.operations {
+		if op.nodeID == "" {
+			continue
+		}
+		switch op.state {
+		case operationLeased, operationRunning:
+			counts[op.nodeID]++
+		}
+	}
+	return counts
+}
+
+func (s *Server) expireOperationLeasesLocked() {
+	now := s.now().UTC()
+	for _, op := range s.operations {
+		switch op.state {
+		case operationLeased, operationRunning:
+		default:
+			continue
+		}
+		if op.deadline.IsZero() || op.deadline.After(now) {
+			continue
+		}
+		op.state = operationQueued
+		op.nodeID = ""
+		op.commandID = ""
+		op.leaseID = ""
+		op.deadline = time.Time{}
+		s.operationQueue = append(s.operationQueue, op.id)
+	}
+}
+
+func (s *Server) nextSeqLocked() int64 {
+	s.nextSeq++
+	return s.nextSeq
 }
 
 func (s *Server) Report(_ context.Context, stream *connect.ClientStream[tinkerv1.NodeEvent]) (*connect.Response[tinkerv1.ReportResponse], error) {
@@ -423,18 +653,65 @@ func (s *Server) applyNodeEvent(event *tinkerv1.NodeEvent) error {
 	}
 	switch {
 	case event.GetStarted() != nil:
+		s.operationStartedLocked(event)
 		load := nodeLoad(node)
 		load.ActiveLeases++
 		if load.QueuedOperations > 0 {
 			load.QueuedOperations--
 		}
 	case event.GetCompleted() != nil || event.GetFailed() != nil:
+		s.operationTerminalLocked(event)
 		load := nodeLoad(node)
 		if load.ActiveLeases > 0 {
 			load.ActiveLeases--
 		}
 	}
 	return nil
+}
+
+func (s *Server) operationStartedLocked(event *tinkerv1.NodeEvent) {
+	op := s.matchOperationLocked(event)
+	if op == nil {
+		return
+	}
+	op.state = operationRunning
+	op.startedAt = s.eventTime(event)
+}
+
+func (s *Server) operationTerminalLocked(event *tinkerv1.NodeEvent) {
+	op := s.matchOperationLocked(event)
+	if op == nil {
+		return
+	}
+	op.completedAt = s.eventTime(event)
+	op.deadline = time.Time{}
+	op.ackPending = true
+	if failed := event.GetFailed(); failed != nil {
+		op.state = operationFailed
+		if err := failed.GetError(); err != nil {
+			op.lastErrorCode = err.GetCode()
+			op.lastError = err.GetMessage()
+		}
+		return
+	}
+	op.state = operationComplete
+	op.lastErrorCode = ""
+	op.lastError = ""
+}
+
+func (s *Server) matchOperationLocked(event *tinkerv1.NodeEvent) *operationState {
+	op := s.operations[event.GetOperationId()]
+	if op == nil || op.leaseID != event.GetLeaseId() || op.nodeID != event.GetNodeId() {
+		return nil
+	}
+	return op
+}
+
+func (s *Server) eventTime(event *tinkerv1.NodeEvent) time.Time {
+	if unix := event.GetUnixNano(); unix != 0 {
+		return time.Unix(0, unix).UTC()
+	}
+	return s.now().UTC()
 }
 
 func nodeLoad(node *nodeState) *tinkerv1.NodeLoad {
@@ -836,6 +1113,13 @@ func cloneLoad(in *tinkerv1.NodeLoad) *tinkerv1.NodeLoad {
 		return nil
 	}
 	return proto.Clone(in).(*tinkerv1.NodeLoad)
+}
+
+func cloneModelRef(in *tinkerv1.ModelRef) *tinkerv1.ModelRef {
+	if in == nil {
+		return nil
+	}
+	return proto.Clone(in).(*tinkerv1.ModelRef)
 }
 
 func inventoryMap(in []*tinkerv1.ArtifactInventory) map[string]*tinkerv1.ArtifactInventory {

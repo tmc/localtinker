@@ -16,6 +16,30 @@ import (
 	"github.com/tmc/localtinker/internal/tinkerproto/tinkerv1/tinkerv1connect"
 )
 
+func newTestRPC(t *testing.T) *Server {
+	t.Helper()
+	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc, err := New(coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rpc
+}
+
+func operationSnapshot(t *testing.T, snap Snapshot, id string) OperationSnapshot {
+	t.Helper()
+	for _, op := range snap.Operations {
+		if op.OperationID == id {
+			return op
+		}
+	}
+	t.Fatalf("operation %s not found in snapshot %+v", id, snap.Operations)
+	return OperationSnapshot{}
+}
+
 func TestRegisterNodeAndListNodes(t *testing.T) {
 	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
@@ -365,6 +389,194 @@ func TestReportOperationEventsUpdateLoad(t *testing.T) {
 	load := nodes.Msg.GetNodes()[0].GetLoad()
 	if load.GetActiveLeases() != 0 || load.GetQueuedOperations() != 0 {
 		t.Fatalf("load = %+v", load)
+	}
+}
+
+func TestWatchAssignsRunOperationsAcrossHealthyNodes(t *testing.T) {
+	rpc := newTestRPC(t)
+	rpc.nodes["node-a"] = &nodeState{
+		state:     nodeHealthy,
+		load:      &tinkerv1.NodeLoad{MemoryAvailableBytes: 16},
+		artifacts: make(map[string]*tinkerv1.ArtifactInventory),
+	}
+	rpc.nodes["node-b"] = &nodeState{
+		state:     nodeHealthy,
+		load:      &tinkerv1.NodeLoad{MemoryAvailableBytes: 16},
+		artifacts: make(map[string]*tinkerv1.ArtifactInventory),
+	}
+	first, err := rpc.EnqueueOperation("forward", []byte(`{"n":1}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := rpc.EnqueueOperation("forward", []byte(`{"n":2}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmdA, err := rpc.watchCommand("node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmdA.GetRun() == nil || cmdA.GetOperationId() != first {
+		t.Fatalf("node-a command = %+v, want first run operation", cmdA)
+	}
+	cmdA2, err := rpc.watchCommand("node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmdA2 != nil {
+		t.Fatalf("second node-a command = %+v, want nil while node-b is less loaded", cmdA2)
+	}
+	cmdB, err := rpc.watchCommand("node-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmdB.GetRun() == nil || cmdB.GetOperationId() != second {
+		t.Fatalf("node-b command = %+v, want second run operation", cmdB)
+	}
+
+	snap := rpc.Snapshot()
+	if len(snap.Operations) != 2 {
+		t.Fatalf("operations = %d, want 2", len(snap.Operations))
+	}
+	firstSnap := operationSnapshot(t, snap, first)
+	if firstSnap.State != operationLeased || firstSnap.NodeID != "node-a" {
+		t.Fatalf("first snapshot = %+v", firstSnap)
+	}
+	secondSnap := operationSnapshot(t, snap, second)
+	if secondSnap.State != operationLeased || secondSnap.NodeID != "node-b" {
+		t.Fatalf("second snapshot = %+v", secondSnap)
+	}
+}
+
+func TestWatchSkipsDrainingNodeForRunOperation(t *testing.T) {
+	rpc := newTestRPC(t)
+	rpc.nodes["node-a"] = &nodeState{
+		state:       nodeDraining,
+		drainReason: "test",
+		load:        &tinkerv1.NodeLoad{},
+		artifacts:   make(map[string]*tinkerv1.ArtifactInventory),
+	}
+	rpc.nodes["node-b"] = &nodeState{
+		state:     nodeHealthy,
+		load:      &tinkerv1.NodeLoad{ActiveLeases: 3},
+		artifacts: make(map[string]*tinkerv1.ArtifactInventory),
+	}
+	opID, err := rpc.EnqueueOperation("forward", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	drain, err := rpc.watchCommand("node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if drain.GetRun() != nil || drain.GetDrain() == nil {
+		t.Fatalf("node-a command = %+v, want drain only", drain)
+	}
+	run, err := rpc.watchCommand("node-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.GetRun() == nil || run.GetOperationId() != opID {
+		t.Fatalf("node-b command = %+v, want run operation %s", run, opID)
+	}
+}
+
+func TestWatchRequeuesExpiredOperationLease(t *testing.T) {
+	rpc := newTestRPC(t)
+	now := time.Date(2026, 5, 5, 10, 0, 0, 0, time.UTC)
+	rpc.now = func() time.Time { return now }
+	rpc.leaseTimeout = time.Second
+	rpc.nodes["node-a"] = &nodeState{
+		state:     nodeHealthy,
+		load:      &tinkerv1.NodeLoad{},
+		artifacts: make(map[string]*tinkerv1.ArtifactInventory),
+	}
+	rpc.nodes["node-b"] = &nodeState{
+		state:     nodeHealthy,
+		load:      &tinkerv1.NodeLoad{},
+		artifacts: make(map[string]*tinkerv1.ArtifactInventory),
+	}
+	opID, err := rpc.EnqueueOperation("forward", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := rpc.watchCommand("node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.GetOperationId() != opID {
+		t.Fatalf("first operation = %q, want %q", first.GetOperationId(), opID)
+	}
+
+	rpc.nodes["node-a"].load.ActiveLeases = 10
+	now = now.Add(2 * time.Second)
+	second, err := rpc.watchCommand("node-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.GetOperationId() != opID || second.GetLeaseId() == first.GetLeaseId() {
+		t.Fatalf("reassigned command = %+v, first lease %q", second, first.GetLeaseId())
+	}
+	snap := rpc.Snapshot()
+	got := operationSnapshot(t, snap, opID)
+	if got.Attempts != 2 || got.NodeID != "node-b" {
+		t.Fatalf("operation snapshot = %+v, want second attempt on node-b", got)
+	}
+}
+
+func TestReportTerminalOperationQueuesAck(t *testing.T) {
+	rpc := newTestRPC(t)
+	rpc.nodes["node-a"] = &nodeState{
+		state:     nodeHealthy,
+		load:      &tinkerv1.NodeLoad{},
+		artifacts: make(map[string]*tinkerv1.ArtifactInventory),
+	}
+	opID, err := rpc.EnqueueOperation("forward", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := rpc.watchCommand("node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rpc.applyNodeEvent(&tinkerv1.NodeEvent{
+		NodeId:      "node-a",
+		CommandId:   cmd.GetCommandId(),
+		LeaseId:     cmd.GetLeaseId(),
+		OperationId: opID,
+		Kind:        cmd.GetKind(),
+		Payload:     &tinkerv1.NodeEvent_Started{Started: &tinkerv1.OperationStarted{}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rpc.applyNodeEvent(&tinkerv1.NodeEvent{
+		NodeId:      "node-a",
+		CommandId:   cmd.GetCommandId(),
+		LeaseId:     cmd.GetLeaseId(),
+		OperationId: opID,
+		Kind:        cmd.GetKind(),
+		Payload:     &tinkerv1.NodeEvent_Completed{Completed: &tinkerv1.OperationCompleted{}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snap := rpc.Snapshot()
+	got := operationSnapshot(t, snap, opID)
+	if got.State != operationComplete || !got.AckPending {
+		t.Fatalf("operation snapshot = %+v, want complete with ack pending", got)
+	}
+	ack, err := rpc.watchCommand("node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ack.GetAckOperation() == nil || len(ack.GetAckOperation().GetOperationIds()) != 1 || ack.GetAckOperation().GetOperationIds()[0] != opID {
+		t.Fatalf("ack command = %+v, want operation %s", ack, opID)
+	}
+	snap = rpc.Snapshot()
+	got = operationSnapshot(t, snap, opID)
+	if got.AckPending {
+		t.Fatalf("operation snapshot = %+v, want ack cleared", got)
 	}
 }
 
