@@ -17,7 +17,7 @@ Tinker SDK when `TINKER_SDK_DIR` is available.
 | Metrics | `sdk_smoke.txt` checks `loss:mean` and that `optimizer_backend:mlx` is reported by an optimizer step. | Covered |
 | Cross-entropy | `internal/tinkertrain/crossentropy_test.go` covers dense target tensors, weighted dense loss, and returned per-token logprobs. | Covered locally |
 | Checkpoints | `sdk_smoke.txt` saves, loads, loads optimizer state, lists, archives, publishes, unpublishes, sets TTL, and deletes checkpoints. It also opens the generated archive and checks expected files. | Covered locally |
-| Archives | `internal/tinkerhttp/routes_test.go` covers local archive expiration and owner metadata headers. | Covered locally |
+| Archives | `internal/tinkerhttp/routes_test.go` covers HTTP archive download URLs, local archive expiration, owner metadata headers, and proxied host headers. | Covered locally |
 | Sampler | `sdk_smoke.txt` saves sampler weights, creates a sampling client, and samples with logprobs, prompt logprobs, seed, temperature, top-p, top-k, and stop settings. `internal/tinkertrain/sample_test.go` covers integer stops, tokenizer-backed string stops, generated token logprobs, and prompt logprobs. | Covered locally |
 | Malformed inputs | `sdk_malformed_inputs.txt` and `sdk_async_errors.txt` verify malformed training and async request errors. | Covered |
 
@@ -152,7 +152,7 @@ limited public beta only if the caveats below are stated plainly.
 | --- | --- | --- |
 | SDK route surface | Meaningful local coverage exists for sessions, futures, training, checkpoints, sampler flows, malformed inputs, and REST listings. | Beta-ready with the covered surface named. |
 | Hosted comparison | No hosted-vs-local JSONL artifact is checked in. | Launch blocker for broad public claims. |
-| Checkpoint downloads | Local archive URLs and metadata are covered; hosted signed URL and authorization behavior are not matched. | Disclose for beta; blocker for hosted-compatible wording. |
+| Checkpoint downloads | Local HTTP archive URLs and metadata are covered; hosted signed URL and authorization behavior are not matched. | Disclose for beta; blocker for hosted-compatible wording. |
 | Futures and queueing | Local queue, cancellation, panic containment, and unfinished-queue recovery are covered; hosted timing/backpressure is not compared. | Disclose for beta. |
 | Cross-entropy | Dense tensors, invalid weights, and logprobs are covered locally; hosted numeric parity is not recorded. | Disclose for beta. |
 | Sampling | Generated logprobs, prompt logprobs, deterministic seed flow, and string stops are covered locally; top-k prompt logprobs are not implemented. | Disclose unsupported top-k prompt logprobs. |
@@ -163,8 +163,8 @@ limited public beta only if the caveats below are stated plainly.
 
 - Futures have local queue, running, cancellation, and result-byte accounting,
   but hosted queue timing and backpressure have not been compared.
-- Checkpoint archive URLs are local `file://` URLs, not hosted signed download
-  URLs.
+- Checkpoint archive URLs are local HTTP download URLs, not hosted signed
+  download URLs.
 - Checkpoint ownership is recorded as `local`; hosted authorization behavior
   has not been compared.
 - Dense cross-entropy and per-token logprobs are local MLX behavior; hosted

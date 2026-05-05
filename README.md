@@ -73,7 +73,7 @@ http://127.0.0.1:8080/
 Use `/runs` for run summaries, `/checkpoints` for local checkpoint paths,
 `/nodes` for node health, and `/artifacts` for artifact state.
 
-Beta limits: local checkpoint archive URLs are `file://` URLs, hosted
+Beta limits: local checkpoint archive URLs are local HTTP download URLs, hosted
 authorization behavior is not reproduced, hosted numeric parity is not
 recorded, top-k prompt logprobs are not implemented, and model execution
 depends on local MLX libraries plus a cached mapped base model.
