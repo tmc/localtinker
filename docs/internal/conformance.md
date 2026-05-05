@@ -96,9 +96,10 @@ ${LOCALTINKER_SDK_PYTHON:-$TINKER_SDK_DIR/.venv/bin/python} \
 
 ## Hosted Comparison
 
-No hosted comparison artifact is checked in yet. Before treating localtinker as
-hosted-compatible, run the same minimal SDK job against hosted Tinker and
-localtinker and record:
+Hosted comparison artifacts under `docs/internal/hosted-comparison/` record
+paired SDK runs against hosted Tinker and localtinker. Before treating a new SDK
+surface as hosted-compatible, run the same minimal SDK job against both backends
+and record:
 
 - training run ID
 - future request IDs and terminal response shapes
@@ -139,7 +140,7 @@ below.
 Store the artifact under `docs/internal/hosted-comparison/` using the pattern:
 
 ```
-YYYYMMDD-<short-commit>-hosted-local.jsonl
+YYYYMMDD-<short-commit>[-<case>]-hosted-local.jsonl
 ```
 
 Each artifact should name the local commit, SDK commit, model, runner machine,
@@ -155,11 +156,11 @@ limited public beta only if the caveats below are stated plainly.
 | Area | Status | Publicization decision |
 | --- | --- | --- |
 | SDK route surface | Meaningful local coverage exists for sessions, futures, training, checkpoints, sampler flows, malformed inputs, and REST listings. | Beta-ready with the covered surface named. |
-| Hosted comparison | `docs/internal/hosted-comparison/20260505-a995c00-hosted-local.jsonl` records hosted-vs-local checkpoint, optimizer-resume, metrics, and sampler shape evidence. | Covered for recorded shapes; numeric and authorization differences remain caveats. |
+| Hosted comparison | `docs/internal/hosted-comparison/20260505-a995c00-hosted-local.jsonl` records hosted-vs-local checkpoint, optimizer-resume, metrics, and sampler shape evidence. `docs/internal/hosted-comparison/20260505-ecc480f-custom-loss-hosted-local.jsonl` records custom-loss shape evidence. | Covered for recorded shapes; numeric and authorization differences remain caveats. |
 | Checkpoint downloads | Local HTTP archive URLs and metadata are covered; hosted signed URL and authorization behavior are not matched. | Disclose for beta; blocker for hosted-compatible wording. |
 | Futures and queueing | Local queue, cancellation, panic containment, and unfinished-queue recovery are covered; hosted timing/backpressure is not compared. | Disclose for beta. |
 | Cross-entropy | Dense tensors, invalid weights, sparse tensor rejection, and logprobs are covered locally; hosted numeric parity is not recorded. | Disclose for beta. |
-| Custom losses | `ForwardBackwardCustom` is not implemented. | Do not advertise custom loss execution. |
+| Custom losses | `docs/internal/hosted-comparison/20260505-ecc480f-custom-loss-hosted-local.jsonl` records hosted and local `forward_backward_custom` success and `custom_loss:mean` metric shape evidence. | Beta-ready with numeric caveats. |
 | Sampling | Generated logprobs, prompt logprobs, deterministic seed flow, string stops, and top-k prompt logprob shapes are covered locally and in hosted comparison rows. | Beta-ready with numeric/distribution caveats. |
 | Packaging | Clean-checkout `GOWORK=off go test ./...` must pass with the intended MLX module graph and native libraries. | Launch blocker until freshly proven. |
 | Secrets and artifacts | No keys, binaries, downloaded weights, generated caches, or private model paths should be staged. | Hard launch gate. |
@@ -179,7 +180,6 @@ limited public beta only if the caveats below are stated plainly.
 - Multimodal model input chunks (`image` and `image_asset_pointer`) are
   rejected instead of being silently ignored; image tensor processing is not
   implemented.
-- `ForwardBackwardCustom` is not implemented.
 - Optimizer state is stored in local checkpoints, but hosted resume parity has
   not been recorded.
 - Hosted and local numeric results are not expected to match exactly.
