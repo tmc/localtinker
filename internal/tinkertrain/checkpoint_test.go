@@ -63,6 +63,57 @@ func TestCheckpointArchive(t *testing.T) {
 	}
 }
 
+func TestSamplerCheckpointArchiveOmitsOptimizerState(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LOCALTINKER_CHECKPOINT_ROOT", root)
+
+	dir := filepath.Join(root, "model_a", "sampler_weights", "ckpt")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"adapters.safetensors": "weights",
+		"adapter_config.json":  "{}\n",
+		checkpointMetadataFile: `{"format":"localtinker.checkpoint","version":1,"has_optimizer":false}` + "\n",
+		checkpointCompleteFile: "ok\n",
+	}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	archive, err := CheckpointArchive("tinker://model_a/sampler_weights/ckpt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	tr := tar.NewReader(f)
+	seen := make(map[string]bool)
+	for {
+		hdr, err := tr.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Fatal(err)
+		}
+		seen[hdr.Name] = true
+	}
+	for name := range files {
+		if !seen[name] {
+			t.Fatalf("archive missing %q; saw %#v", name, seen)
+		}
+	}
+	if seen[checkpointOptimizerFile] {
+		t.Fatalf("sampler archive unexpectedly included %q", checkpointOptimizerFile)
+	}
+}
+
 func TestOptimizerStateRoundTrip(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("LOCALTINKER_CHECKPOINT_ROOT", root)
@@ -92,6 +143,20 @@ func TestOptimizerStateRoundTrip(t *testing.T) {
 	}
 	if got.Step != state.Step || got.LastAdam.LearningRate != state.LastAdam.LearningRate {
 		t.Fatalf("optimizer state = %#v, want %#v", got, state)
+	}
+}
+
+func TestOptimizerStateRejectsInvalidState(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, checkpointOptimizerFile)
+	if _, err := readOptimizerState(path); err == nil {
+		t.Fatal("read missing optimizer state succeeded")
+	}
+	if err := os.WriteFile(path, []byte(`{"format":"other","version":1}`+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readOptimizerState(path); err == nil {
+		t.Fatal("read invalid optimizer state succeeded")
 	}
 }
 
