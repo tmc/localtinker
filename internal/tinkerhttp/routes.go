@@ -640,7 +640,11 @@ func validateCrossEntropyDatum(i int, datum tinkertrain.Datum) error {
 	if weight, ok := datum.LossFnInputs["weights"]; ok && !sameShape(weight.Shape, target.Shape) {
 		return fmt.Errorf("datum %d weights shape %v does not match target_tokens shape %v", i, weight.Shape, target.Shape)
 	}
-	if tokens := tokenCount(datum.ModelInput); tokens != len(target.Data) {
+	tokens, err := tokenCount(datum.ModelInput)
+	if err != nil {
+		return fmt.Errorf("datum %d: %w", i, err)
+	}
+	if tokens != len(target.Data) {
 		return fmt.Errorf("datum %d input tokens length %d does not match target_tokens length %d", i, tokens, len(target.Data))
 	}
 	return nil
@@ -658,21 +662,28 @@ func sameShape(a, b []int) bool {
 	return true
 }
 
-func tokenCount(input tinkertrain.ModelInput) int {
+func tokenCount(input tinkertrain.ModelInput) (int, error) {
 	var n int
 	for _, chunk := range input.Chunks {
-		if chunk.Type == "" || chunk.Type == "encoded_text" {
+		switch chunk.Type {
+		case "", "encoded_text":
 			n += len(chunk.Tokens)
+		case "image", "image_asset_pointer":
+			return 0, fmt.Errorf("unsupported model input chunk type %q", chunk.Type)
 		}
 	}
-	return n
+	return n, nil
 }
 
 func validateSampleRequest(req tinkertrain.SampleRequest) error {
 	if req.SamplingSessionID == "" && req.ModelPath == "" && req.BaseModel == "" {
 		return errors.New("missing sampling_session_id, model_path, or base_model")
 	}
-	if tokenCount(req.Prompt) == 0 {
+	tokens, err := tokenCount(req.Prompt)
+	if err != nil {
+		return err
+	}
+	if tokens == 0 {
 		return errors.New("prompt is empty")
 	}
 	if req.TopKPromptLogprobs < 0 {

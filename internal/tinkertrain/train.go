@@ -331,12 +331,15 @@ func (d Datum) weights(n int) ([]float64, error) {
 	return append([]float64(nil), weight.Data...), nil
 }
 
-func (m ModelInput) tokens() []int {
+func (m ModelInput) tokens() ([]int, error) {
 	var out []int
 	for _, chunk := range m.Chunks {
-		if chunk.Type == "" || chunk.Type == "encoded_text" {
+		switch chunk.Type {
+		case "", "encoded_text":
 			out = append(out, chunk.Tokens...)
+		case "image", "image_asset_pointer":
+			return nil, fmt.Errorf("unsupported model input chunk type %q", chunk.Type)
 		}
 	}
-	return out
+	return out, nil
 }
