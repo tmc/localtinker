@@ -158,7 +158,7 @@ limited public beta only if the caveats below are stated plainly.
 | SDK route surface | Meaningful local coverage exists for sessions, futures, training, checkpoints, sampler flows, malformed inputs, and REST listings. | Beta-ready with the covered surface named. |
 | Hosted comparison | `hosted comparison fixture` records hosted-vs-local checkpoint, optimizer-resume, metrics, and sampler shape evidence. `hosted comparison fixture` records custom-loss shape evidence. `hosted comparison fixture` records dense cross-entropy shape and loss evidence. | Covered for recorded shapes; numeric and authorization differences remain caveats. |
 | Checkpoint downloads | Local HTTP archive URLs and metadata are covered; hosted signed URL and authorization behavior are not matched. | Disclose for beta; blocker for hosted-compatible wording. |
-| Futures and queueing | Local queue, cancellation, panic containment, and unfinished-queue recovery are covered; hosted timing/backpressure is not compared. | Disclose for beta. |
+| Futures and queueing | Local queue, cancellation, panic containment, and unfinished-queue recovery are covered. Hosted cancellation could not be compared: the generated hosted SDK exposes retrieve-only futures and the probed hosted cancel route returned 404. Hosted timing/backpressure is also not compared. | Disclose for beta. |
 | Cross-entropy | Dense tensors, invalid weights, sparse tensor rejection, and logprobs are covered locally. `hosted comparison fixture` records matching hosted/local per-token logprob shapes and a forward loss mean difference. | Beta-ready with numeric caveats. |
 | Custom losses | `hosted comparison fixture` records hosted and local `forward_backward_custom` success and `custom_loss:mean` metric shape evidence. | Beta-ready with numeric caveats. |
 | Sampling | Generated logprobs, prompt logprobs, deterministic seed flow, string stops, and top-k prompt logprob shapes are covered locally and in hosted comparison rows. | Beta-ready with numeric/distribution caveats. |
@@ -167,8 +167,10 @@ limited public beta only if the caveats below are stated plainly.
 
 ## Known Differences
 
-- Futures have local queue, running, cancellation, and result-byte accounting,
-  but hosted queue timing and backpressure have not been compared.
+- Futures have local queue, running, cancellation, and result-byte accounting.
+  Hosted cancellation is not exposed by the generated SDK in the recorded probe,
+  the probed hosted cancel route returned 404, and hosted queue timing and
+  backpressure have not been compared.
 - Checkpoint archive URLs are local HTTP download URLs, not hosted signed
   download URLs.
 - Checkpoint ownership is recorded as `local`; hosted authorization behavior
