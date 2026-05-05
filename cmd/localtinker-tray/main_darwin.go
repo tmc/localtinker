@@ -122,6 +122,11 @@ func (t *trayApp) registerDelegate() error {
 		[]objc.MethodDef{
 			{Cmd: objc.RegisterName("menuNeedsUpdate:"), Fn: t.handleMenuNeedsUpdate},
 			{Cmd: objc.RegisterName("refreshNow:"), Fn: t.handleRefreshNow},
+			{Cmd: objc.RegisterName("openDashboard:"), Fn: t.handleOpenDashboard},
+			{Cmd: objc.RegisterName("openRuns:"), Fn: t.handleOpenRuns},
+			{Cmd: objc.RegisterName("openCheckpoints:"), Fn: t.handleOpenCheckpoints},
+			{Cmd: objc.RegisterName("openNodes:"), Fn: t.handleOpenNodes},
+			{Cmd: objc.RegisterName("openArtifacts:"), Fn: t.handleOpenArtifacts},
 			{Cmd: objc.RegisterName("quit:"), Fn: t.handleQuit},
 		},
 	)
@@ -201,6 +206,11 @@ func (t *trayApp) handleMenuNeedsUpdate(_ objc.ID, _ objc.SEL, menuID objc.ID) {
 		addDisabledItem(menu, line)
 	}
 	addSeparator(menu)
+	addActionItem(menu, "Open Dashboard", "openDashboard:", t.delegateID)
+	addActionItem(menu, "Open Runs", "openRuns:", t.delegateID)
+	addActionItem(menu, "Open Checkpoints", "openCheckpoints:", t.delegateID)
+	addActionItem(menu, "Open Nodes", "openNodes:", t.delegateID)
+	addActionItem(menu, "Open Artifacts", "openArtifacts:", t.delegateID)
 	addActionItem(menu, "Refresh Now", "refreshNow:", t.delegateID)
 	addActionItem(menu, "Quit", "quit:", t.delegateID)
 }
@@ -209,9 +219,34 @@ func (t *trayApp) handleRefreshNow(_ objc.ID, _ objc.SEL, _ objc.ID) {
 	go t.refresh()
 }
 
+func (t *trayApp) handleOpenDashboard(_ objc.ID, _ objc.SEL, _ objc.ID) {
+	openDashboard(t.coordinator, "/")
+}
+
+func (t *trayApp) handleOpenRuns(_ objc.ID, _ objc.SEL, _ objc.ID) {
+	openDashboard(t.coordinator, "/runs")
+}
+
+func (t *trayApp) handleOpenCheckpoints(_ objc.ID, _ objc.SEL, _ objc.ID) {
+	openDashboard(t.coordinator, "/checkpoints")
+}
+
+func (t *trayApp) handleOpenNodes(_ objc.ID, _ objc.SEL, _ objc.ID) {
+	openDashboard(t.coordinator, "/nodes")
+}
+
+func (t *trayApp) handleOpenArtifacts(_ objc.ID, _ objc.SEL, _ objc.ID) {
+	openDashboard(t.coordinator, "/artifacts")
+}
+
 func (t *trayApp) handleQuit(_ objc.ID, _ objc.SEL, _ objc.ID) {
 	t.close()
 	t.app.Terminate(nil)
+}
+
+func openDashboard(coordinator, path string) bool {
+	url := foundation.NewURLWithString(dashboardURL(coordinator, path))
+	return appkit.GetNSWorkspaceClass().SharedWorkspace().OpenURL(url)
 }
 
 func addDisabledItem(menu appkit.NSMenu, title string) {

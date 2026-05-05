@@ -57,3 +57,24 @@ func TestSnapshotMenuLines(t *testing.T) {
 		}
 	}
 }
+
+func TestDashboardURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		coordinator string
+		path        string
+		want        string
+	}{
+		{name: "root", coordinator: "http://127.0.0.1:8080", path: "/", want: "http://127.0.0.1:8080/"},
+		{name: "trim slash", coordinator: "http://127.0.0.1:8080/", path: "/nodes", want: "http://127.0.0.1:8080/nodes"},
+		{name: "add slash", coordinator: "http://127.0.0.1:8080", path: "artifacts", want: "http://127.0.0.1:8080/artifacts"},
+		{name: "default", coordinator: "http://127.0.0.1:8080/", want: "http://127.0.0.1:8080/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := dashboardURL(tt.coordinator, tt.path); got != tt.want {
+				t.Fatalf("dashboardURL(%q, %q) = %q, want %q", tt.coordinator, tt.path, got, tt.want)
+			}
+		})
+	}
+}

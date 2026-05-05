@@ -24,3 +24,7 @@ The status item title is intentionally compact:
 - `T?`: selected node is not present
 - `T0`: coordinator has no registered nodes
 - `Tn`: active leases when any are running, otherwise node count
+
+The menu links to the dashboard, runs, checkpoints, nodes, and artifacts pages.
+It also includes a manual refresh action and the current node and artifact
+summary.
