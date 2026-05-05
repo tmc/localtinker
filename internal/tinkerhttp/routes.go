@@ -675,6 +675,9 @@ func validateSampleRequest(req tinkertrain.SampleRequest) error {
 	if tokenCount(req.Prompt) == 0 {
 		return errors.New("prompt is empty")
 	}
+	if req.TopKPromptLogprobs < 0 {
+		return errors.New("topk_prompt_logprobs is negative")
+	}
 	return nil
 }
 

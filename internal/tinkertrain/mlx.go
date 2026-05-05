@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -297,12 +298,19 @@ func (m *mlxModel) sample(ctx context.Context, req SampleRequest) (SampleOutput,
 		Type:      "sample",
 		Sequences: make([]SampledSequence, 0, numSamples),
 	}
-	if req.SamplingParams.PromptLogprobs {
+	if req.PromptLogprobs || req.SamplingParams.PromptLogprobs {
 		logprobs, err := m.tokenLogprobs(ctx, prompt)
 		if err != nil {
 			return SampleOutput{}, fmt.Errorf("prompt logprobs: %w", err)
 		}
 		out.PromptLogprobs = logprobs
+	}
+	if req.TopKPromptLogprobs > 0 {
+		logprobs, err := m.topKPromptLogprobs(ctx, prompt, req.TopKPromptLogprobs)
+		if err != nil {
+			return SampleOutput{}, fmt.Errorf("top-k prompt logprobs: %w", err)
+		}
+		out.TopKPromptLogprobs = logprobs
 	}
 	for range numSamples {
 		seq := append([]int(nil), prompt...)
@@ -433,6 +441,50 @@ func (m *mlxModel) tokenLogprobs(ctx context.Context, tokens []int) ([]*float64,
 		out[i] = &logprobs[token]
 	}
 	return out, nil
+}
+
+func (m *mlxModel) topKPromptLogprobs(ctx context.Context, tokens []int, k int) ([]any, error) {
+	if len(tokens) == 0 || k <= 0 {
+		return nil, nil
+	}
+	out := make([]any, len(tokens))
+	for i := 1; i < len(tokens); i++ {
+		logits, err := m.logits(ctx, tokens[:i])
+		if err != nil {
+			return nil, err
+		}
+		logprobs, err := lastLogprobs(logits)
+		logits.Free()
+		if err != nil {
+			return nil, err
+		}
+		out[i] = topKLogprobs(logprobs, k)
+	}
+	return out, nil
+}
+
+func topKLogprobs(logprobs []float64, k int) [][]any {
+	if k <= 0 || len(logprobs) == 0 {
+		return nil
+	}
+	if k > len(logprobs) {
+		k = len(logprobs)
+	}
+	ids := make([]int, len(logprobs))
+	for i := range ids {
+		ids[i] = i
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		if logprobs[ids[i]] == logprobs[ids[j]] {
+			return ids[i] < ids[j]
+		}
+		return logprobs[ids[i]] > logprobs[ids[j]]
+	})
+	out := make([][]any, k)
+	for i, token := range ids[:k] {
+		out[i] = []any{token, logprobs[token]}
+	}
+	return out
 }
 
 func lastLogprobs(logits *mlx.Array) ([]float64, error) {

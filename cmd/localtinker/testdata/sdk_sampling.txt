@@ -31,12 +31,13 @@ try:
         req = {
             "model_path": saved.path,
             "num_samples": 1,
+            "prompt_logprobs": True,
+            "topk_prompt_logprobs": 2,
             "prompt": {"chunks": [{"type": "encoded_text", "tokens": [1, 1, 1]}]},
             "sampling_params": {
                 "max_tokens": 1,
                 "temperature": 0,
                 "seed": 7,
-                "prompt_logprobs": True,
             },
         }
         first = raw.post("/api/v1/asample", json=req)
@@ -62,6 +63,9 @@ try:
     assert len(first["prompt_logprobs"]) == 3, first
     assert first["prompt_logprobs"][0] is None, first
     assert all(x is not None for x in first["prompt_logprobs"][1:]), first
+    assert len(first["topk_prompt_logprobs"]) == 3, first
+    assert first["topk_prompt_logprobs"][0] is None, first
+    assert all(len(x) == 2 for x in first["topk_prompt_logprobs"][1:]), first
     print("SDK_SAMPLING_OK", saved.path)
 finally:
     client.holder.close()

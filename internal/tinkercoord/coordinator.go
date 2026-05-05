@@ -283,6 +283,7 @@ func (c *Coordinator) Capabilities(_ context.Context) ServerCapabilities {
 				"sample_generated_logprobs",
 				"sample_prompt_logprobs",
 				"sample_string_stops",
+				"top_k_prompt_logprobs",
 			},
 		}},
 	}

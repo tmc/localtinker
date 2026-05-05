@@ -53,13 +53,11 @@ func TestCapabilitiesAdvertiseSamplerConformance(t *testing.T) {
 		"sample_generated_logprobs",
 		"sample_prompt_logprobs",
 		"sample_string_stops",
+		"top_k_prompt_logprobs",
 	} {
 		if !slices.Contains(supported, feature) {
 			t.Fatalf("supported = %v, missing %q", supported, feature)
 		}
-	}
-	if slices.Contains(supported, "top_k_prompt_logprobs") {
-		t.Fatalf("supported = %v, must not advertise top_k_prompt_logprobs", supported)
 	}
 }
 

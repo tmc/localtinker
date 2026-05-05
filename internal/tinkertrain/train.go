@@ -81,13 +81,15 @@ type OptimStepOutput struct {
 }
 
 type SampleRequest struct {
-	SamplingSessionID string         `json:"sampling_session_id,omitempty"`
-	SeqID             int            `json:"seq_id,omitempty"`
-	NumSamples        int            `json:"num_samples"`
-	Prompt            ModelInput     `json:"prompt"`
-	SamplingParams    SamplingParams `json:"sampling_params"`
-	BaseModel         string         `json:"base_model,omitempty"`
-	ModelPath         string         `json:"model_path,omitempty"`
+	SamplingSessionID  string         `json:"sampling_session_id,omitempty"`
+	SeqID              int            `json:"seq_id,omitempty"`
+	NumSamples         int            `json:"num_samples"`
+	Prompt             ModelInput     `json:"prompt"`
+	SamplingParams     SamplingParams `json:"sampling_params"`
+	PromptLogprobs     bool           `json:"prompt_logprobs,omitempty"`
+	TopKPromptLogprobs int            `json:"topk_prompt_logprobs,omitempty"`
+	BaseModel          string         `json:"base_model,omitempty"`
+	ModelPath          string         `json:"model_path,omitempty"`
 }
 
 type SamplingParams struct {
@@ -101,9 +103,10 @@ type SamplingParams struct {
 }
 
 type SampleOutput struct {
-	Type           string            `json:"type"`
-	Sequences      []SampledSequence `json:"sequences"`
-	PromptLogprobs []*float64        `json:"prompt_logprobs,omitempty"`
+	Type               string            `json:"type"`
+	Sequences          []SampledSequence `json:"sequences"`
+	PromptLogprobs     []*float64        `json:"prompt_logprobs,omitempty"`
+	TopKPromptLogprobs []any             `json:"topk_prompt_logprobs,omitempty"`
 }
 
 type SampledSequence struct {
