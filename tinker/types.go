@@ -258,6 +258,11 @@ func validateWeights(in LossInput, n int, targetShape []int) error {
 		if err != nil {
 			return err
 		}
+		for _, v := range in.WeightsTensor.Data {
+			if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+				return errors.New("weights tensor contains invalid weight")
+			}
+		}
 		if wn != n {
 			return errors.New("weights length does not match target tokens")
 		}
@@ -268,6 +273,11 @@ func validateWeights(in LossInput, n int, targetShape []int) error {
 	}
 	if len(in.Weights) != 0 && len(in.Weights) != n {
 		return errors.New("weights length does not match target tokens")
+	}
+	for _, v := range in.Weights {
+		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) || v < 0 {
+			return errors.New("weights contain invalid weight")
+		}
 	}
 	return nil
 }
