@@ -755,11 +755,15 @@ func (m *mlxModel) trainDenseStep(ctx context.Context, batch denseBatch, params 
 	loss := step.Step(training.NewTrainingContext(len(trainable), 3), []*mlx.Array{inputs, targets, weights}, lrTensor)
 	defer loss.Free()
 	updated := step.GetParams()
-	eval := append(append([]*mlx.Array{}, updated...), loss)
+	owned := make([]*mlx.Array, len(updated))
+	for i, param := range updated {
+		owned[i] = mlx.Copy(param)
+	}
+	eval := append(append([]*mlx.Array{}, owned...), loss)
 	if err := mlx.Eval(eval...); err != nil {
 		return 0, fmt.Errorf("eval: %w", err)
 	}
-	m.adapters.UpdateParams(updated)
+	m.adapters.UpdateParams(owned)
 	loss32, err := mlx.ItemAs[float32](loss)
 	if err != nil {
 		return 0, fmt.Errorf("loss: %w", err)
