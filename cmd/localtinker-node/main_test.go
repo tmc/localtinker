@@ -76,6 +76,53 @@ func TestCacheDelete(t *testing.T) {
 	}
 }
 
+func TestHandleCommandAppliesArtifactRetention(t *testing.T) {
+	store, roots := testStoreWithArtifacts(t, map[string]string{
+		"root-a": "aaaa",
+		"root-b": "bbbbbbbb",
+	})
+	if done, err := handleCommand(store, &tinkerv1.NodeCommand{
+		CommandId: "retain-1",
+		Directive: &tinkerv1.NodeCommand_ArtifactRetention{
+			ArtifactRetention: &tinkerv1.ApplyArtifactRetention{
+				ProtectedRootHashes: []string{roots["root-b"]},
+				TargetFreeBytes:     4,
+			},
+		},
+	}, func() {}); err != nil || done {
+		t.Fatalf("handle retention: done=%v err=%v", done, err)
+	}
+	if store.Has(roots["root-a"]) {
+		t.Fatal("root-a still installed")
+	}
+	if !store.Has(roots["root-b"]) {
+		t.Fatal("root-b was deleted")
+	}
+}
+
+func TestHandleCommandDeletesArtifacts(t *testing.T) {
+	store, roots := testStoreWithArtifacts(t, map[string]string{
+		"root-a": "aaaa",
+		"root-b": "bbbb",
+	})
+	if done, err := handleCommand(store, &tinkerv1.NodeCommand{
+		CommandId: "delete-1",
+		Directive: &tinkerv1.NodeCommand_DeleteArtifact{
+			DeleteArtifact: &tinkerv1.DeleteArtifact{
+				RootHashes: []string{roots["root-a"]},
+			},
+		},
+	}, func() {}); err != nil || done {
+		t.Fatalf("handle delete: done=%v err=%v", done, err)
+	}
+	if store.Has(roots["root-a"]) {
+		t.Fatal("root-a still installed")
+	}
+	if !store.Has(roots["root-b"]) {
+		t.Fatal("root-b was deleted")
+	}
+}
+
 func TestCacheImportPublishAndSync(t *testing.T) {
 	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
@@ -147,6 +194,32 @@ func TestCacheImportPublishAndSync(t *testing.T) {
 	if string(got) != "mesh weights" {
 		t.Fatalf("synced weights = %q", got)
 	}
+}
+
+func testStoreWithArtifacts(t *testing.T, files map[string]string) (*tinkerartifact.Store, map[string]string) {
+	t.Helper()
+	store, err := tinkerartifact.OpenStore(filepath.Join(t.TempDir(), "artifact-store"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := make(map[string]string)
+	for name, body := range files {
+		src := t.TempDir()
+		if err := os.WriteFile(filepath.Join(src, "weights.bin"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		m, err := store.AddDirectory(context.Background(), src, tinkerartifact.ManifestOptions{
+			Kind:      tinkerartifact.ArtifactTrainingCheckpoint,
+			Storage:   tinkerartifact.StorageTinker,
+			Name:      name,
+			ChunkSize: 4,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		roots[name] = m.RootHash
+	}
+	return store, roots
 }
 
 func TestHandlePrewarmSyncsAndReportsInventory(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"connectrpc.com/connect"
@@ -116,7 +117,7 @@ func runNode(args []string) error {
 	log.Printf("registered node %s with coordinator %s", nodeID, reg.Msg.GetCoordinatorId())
 	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
-	go watchCommands(runCtx, client, nodeID, reg.Msg.GetCoordinatorId(), cancelRun)
+	go watchCommands(runCtx, client, store, nodeID, reg.Msg.GetCoordinatorId(), cancelRun)
 
 	if artifacts, err := artifactInventory(store); err == nil {
 		resp, err := client.Heartbeat(runCtx, connect.NewRequest(&tinkerv1.HeartbeatRequest{
@@ -182,7 +183,7 @@ func runNode(args []string) error {
 	}
 }
 
-func watchCommands(ctx context.Context, client tinkerv1connect.TinkerCoordinatorClient, nodeID, coordinatorID string, cancel context.CancelFunc) {
+func watchCommands(ctx context.Context, client tinkerv1connect.TinkerCoordinatorClient, store *tinkerartifact.Store, nodeID, coordinatorID string, cancel context.CancelFunc) {
 	for {
 		stream, err := client.Watch(ctx, connect.NewRequest(&tinkerv1.WatchRequest{
 			NodeId:        nodeID,
@@ -203,12 +204,13 @@ func watchCommands(ctx context.Context, client tinkerv1connect.TinkerCoordinator
 			if err := reportCommandAck(ctx, client, nodeID, cmd); err != nil {
 				log.Printf("ack command %s: %v", cmd.GetCommandId(), err)
 			}
-			if cmd.GetDrain() != nil {
-				log.Printf("drain command %s: %s", cmd.GetCommandId(), cmd.GetDrain().GetReason())
-				cancel()
+			done, err := handleCommand(store, cmd, cancel)
+			if err != nil {
+				log.Printf("command %s: %v", cmd.GetCommandId(), err)
+			}
+			if done {
 				return
 			}
-			log.Printf("unsupported command %s kind %q", cmd.GetCommandId(), cmd.GetKind())
 		}
 		if err := stream.Err(); err != nil && ctx.Err() == nil {
 			log.Printf("watch: %v", err)
@@ -217,6 +219,73 @@ func watchCommands(ctx context.Context, client tinkerv1connect.TinkerCoordinator
 			return
 		}
 	}
+}
+
+func handleCommand(store *tinkerartifact.Store, cmd *tinkerv1.NodeCommand, cancel context.CancelFunc) (bool, error) {
+	if cmd.GetDrain() != nil {
+		log.Printf("drain command %s: %s", cmd.GetCommandId(), cmd.GetDrain().GetReason())
+		cancel()
+		return true, nil
+	}
+	if retention := cmd.GetArtifactRetention(); retention != nil {
+		return false, applyRetention(store, retention)
+	}
+	if del := cmd.GetDeleteArtifact(); del != nil {
+		return false, deleteArtifacts(store, del.GetRootHashes())
+	}
+	log.Printf("unsupported command %s kind %q", cmd.GetCommandId(), cmd.GetKind())
+	return false, nil
+}
+
+func applyRetention(store *tinkerartifact.Store, retention *tinkerv1.ApplyArtifactRetention) error {
+	if retention.GetTargetFreeBytes() == 0 {
+		return nil
+	}
+	protected := make(map[string]bool)
+	for _, root := range retention.GetProtectedRootHashes() {
+		if root != "" {
+			protected[root] = true
+		}
+	}
+	refs, err := store.Inventory()
+	if err != nil {
+		return err
+	}
+	sort.Slice(refs, func(i, j int) bool {
+		return refs[i].RootHash < refs[j].RootHash
+	})
+	var freed uint64
+	for _, ref := range refs {
+		if protected[ref.RootHash] {
+			continue
+		}
+		m, err := store.Manifest(ref.RootHash)
+		if err != nil {
+			return err
+		}
+		if err := store.Delete(ref.RootHash); err != nil {
+			return err
+		}
+		if m.Size > 0 {
+			freed += uint64(m.Size)
+		}
+		if freed >= retention.GetTargetFreeBytes() {
+			break
+		}
+	}
+	return nil
+}
+
+func deleteArtifacts(store *tinkerartifact.Store, roots []string) error {
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		if err := store.Delete(root); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func reportCommandAck(ctx context.Context, client tinkerv1connect.TinkerCoordinatorClient, nodeID string, cmd *tinkerv1.NodeCommand) error {
