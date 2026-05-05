@@ -35,6 +35,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/get_server_capabilities", s.getServerCapabilities)
 	mux.HandleFunc("POST /api/v1/telemetry", s.telemetry)
 	mux.HandleFunc("POST /api/v1/retrieve_future", s.retrieveFuture)
+	mux.HandleFunc("POST /api/v1/cancel_future", s.cancelFuture)
 	mux.HandleFunc("POST /api/v1/create_model", s.createModel)
 	mux.HandleFunc("POST /api/v1/unload_model", s.unloadModel)
 	mux.HandleFunc("POST /api/v1/forward", s.forward)
@@ -183,6 +184,29 @@ func (s *Server) retrieveFuture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	future, err := s.coord.RetrieveFuture(r.Context(), id, req.AllowMetadataOnly)
+	if errors.Is(err, tinkerdb.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "unknown future")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "system_error", err.Error())
+		return
+	}
+	s.writeFutureResult(w, future)
+}
+
+func (s *Server) cancelFuture(w http.ResponseWriter, r *http.Request) {
+	var req RetrieveFutureRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	id := first(req.FutureID, req.RequestID, req.ID)
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "missing future_id")
+		return
+	}
+	future, err := s.coord.CancelFuture(r.Context(), id)
 	if errors.Is(err, tinkerdb.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "unknown future")
 		return

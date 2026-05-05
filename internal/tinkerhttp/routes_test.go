@@ -190,6 +190,34 @@ func TestRetrieveFutureRoute(t *testing.T) {
 	}
 }
 
+func TestCancelFutureRoute(t *testing.T) {
+	store := tinkerdb.OpenMemory()
+	c, err := tinkercoord.New(tinkercoord.Config{Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued := tinkerdb.Future{ID: "fut-cancel", State: tinkercoord.FutureQueued}
+	if err := store.PutFuture(nil, queued); err != nil {
+		t.Fatal(err)
+	}
+
+	var canceled map[string]any
+	postJSON(t, New(c).Handler(), "/api/v1/cancel_future",
+		RetrieveFutureRequest{RequestID: queued.ID},
+		&canceled,
+	)
+	if canceled["category"] != "server" || canceled["request_id"] != queued.ID {
+		t.Fatalf("canceled = %#v", canceled)
+	}
+	got, err := store.GetFuture(nil, queued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != tinkercoord.FutureCanceled {
+		t.Fatalf("state = %q, want %q", got.State, tinkercoord.FutureCanceled)
+	}
+}
+
 func TestUnsupportedOperationReturnsFutureFailure(t *testing.T) {
 	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
@@ -219,7 +247,10 @@ func TestUnsupportedOperationReturnsFutureFailure(t *testing.T) {
 }
 
 func TestForwardBackwardAndOptimStepTune(t *testing.T) {
-	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	c, err := tinkercoord.New(tinkercoord.Config{
+		Store:        tinkerdb.OpenMemory(),
+		LeaseTimeout: 2 * time.Minute,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -810,24 +841,30 @@ func trainingLoss(t *testing.T, h http.Handler, path string, body any) float64 {
 	t.Helper()
 	var future FutureResponse
 	postJSON(t, h, path, body, &future)
-	var out struct {
-		Metrics map[string]float64 `json:"metrics"`
-	}
-	postJSON(t, h, "/api/v1/retrieve_future",
-		RetrieveFutureRequest{RequestID: future.RequestID},
-		&out,
-	)
-	return out.Metrics["loss:mean"]
+	out := retrieveOK(t, h, future.RequestID)
+	metrics, _ := out["metrics"].(map[string]any)
+	loss, _ := metrics["loss:mean"].(float64)
+	return loss
 }
 
-func retrieveOK(t *testing.T, h http.Handler, requestID string) {
+func retrieveOK(t *testing.T, h http.Handler, requestID string) map[string]any {
 	t.Helper()
-	var out map[string]any
-	postJSON(t, h, "/api/v1/retrieve_future",
-		RetrieveFutureRequest{RequestID: requestID},
-		&out,
-	)
-	if _, ok := out["error"]; ok {
-		t.Fatalf("future failed: %#v", out)
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		var out map[string]any
+		postJSON(t, h, "/api/v1/retrieve_future",
+			RetrieveFutureRequest{RequestID: requestID},
+			&out,
+		)
+		if _, ok := out["error"]; ok {
+			t.Fatalf("future failed: %#v", out)
+		}
+		if out["type"] != "try_again" {
+			return out
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("future %s did not complete: %#v", requestID, out)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
