@@ -80,11 +80,17 @@ print(info.model_id)
 client.holder.close()
 ```
 
-Supported local routes include session creation, heartbeat, model creation,
-`forward`, `forward_backward`, `optim_step`, save/load weights, sampler
-sessions, sampling, training run listing, checkpoint listing, archive URLs,
-publish/unpublish, TTL, and delete. Unsupported hosted features return local
-user errors instead of silently falling back to the hosted service.
+Supported local routes include session creation, heartbeat, REST session
+listing, model creation, futures, future cancellation, `forward`,
+`forward_backward`, `optim_step`, save/load weights,
+`load_state_with_optimizer`, sampler sessions, sampling, training run listing,
+checkpoint listing, archive URLs, publish/unpublish, TTL, and delete. Sampling
+returns generated-token logprobs and can return prompt logprobs. Unsupported
+hosted features return local user errors instead of silently falling back to the
+hosted service.
+
+See `docs/internal/conformance.md` for the current SDK coverage and hosted
+comparison checklist.
 
 ## Development
 
