@@ -68,7 +68,8 @@ func runNode(args []string) error {
 	if err != nil {
 		return err
 	}
-	advertisedPeer, closePeer, err := startArtifactPeer(*peerAddr, *peerURL, store)
+	runtime := tinkernode.NewRuntime(*id)
+	advertisedPeer, closePeer, err := startArtifactPeer(*peerAddr, *peerURL, store, runtime)
 	if err != nil {
 		return err
 	}
@@ -114,6 +115,8 @@ func runNode(args []string) error {
 		return fmt.Errorf("register node: %w", err)
 	}
 	nodeID := reg.Msg.GetAssignedNodeId()
+	runtime.SetNodeID(nodeID)
+	runtime.SetBaseLoad(&tinkerv1.NodeLoad{MemoryAvailableBytes: caps.Memory.AvailableBytes})
 	log.Printf("registered node %s with coordinator %s", nodeID, reg.Msg.GetCoordinatorId())
 	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
@@ -124,7 +127,7 @@ func runNode(args []string) error {
 			NodeId:   nodeID,
 			UnixNano: time.Now().UnixNano(),
 			Load: &tinkerv1.NodeLoad{
-				ActiveLeases:         0,
+				ActiveLeases:         runtime.ActiveLeases(),
 				QueuedOperations:     0,
 				MemoryAvailableBytes: caps.Memory.AvailableBytes,
 			},
@@ -158,7 +161,7 @@ func runNode(args []string) error {
 				NodeId:   nodeID,
 				UnixNano: time.Now().UnixNano(),
 				Load: &tinkerv1.NodeLoad{
-					ActiveLeases:         0,
+					ActiveLeases:         runtime.ActiveLeases(),
 					QueuedOperations:     0,
 					MemoryAvailableBytes: caps.Memory.AvailableBytes,
 				},
@@ -667,12 +670,15 @@ func hostname() string {
 	return name
 }
 
-func startArtifactPeer(addr, advertised string, store *tinkerartifact.Store) (string, func(), error) {
+func startArtifactPeer(addr, advertised string, store *tinkerartifact.Store, runtime *tinkernode.Runtime) (string, func(), error) {
 	if addr == "" {
 		return advertised, func() {}, nil
 	}
 	mux := http.NewServeMux()
 	tinkernode.RegisterArtifactPeer(mux, store, connect.WithReadMaxBytes(rpcMaxBytes), connect.WithSendMaxBytes(rpcMaxBytes))
+	if runtime != nil {
+		tinkernode.RegisterRuntime(mux, runtime, connect.WithReadMaxBytes(rpcMaxBytes), connect.WithSendMaxBytes(rpcMaxBytes))
+	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return "", nil, err
