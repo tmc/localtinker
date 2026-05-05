@@ -81,7 +81,7 @@ func TestHandleCommandAppliesArtifactRetention(t *testing.T) {
 		"root-a": "aaaa",
 		"root-b": "bbbbbbbb",
 	})
-	if done, err := handleCommand(store, &tinkerv1.NodeCommand{
+	if done, err := handleCommand(context.Background(), nil, store, nil, "node-1", &tinkerv1.NodeCommand{
 		CommandId: "retain-1",
 		Directive: &tinkerv1.NodeCommand_ArtifactRetention{
 			ArtifactRetention: &tinkerv1.ApplyArtifactRetention{
@@ -105,7 +105,7 @@ func TestHandleCommandDeletesArtifacts(t *testing.T) {
 		"root-a": "aaaa",
 		"root-b": "bbbb",
 	})
-	if done, err := handleCommand(store, &tinkerv1.NodeCommand{
+	if done, err := handleCommand(context.Background(), nil, store, nil, "node-1", &tinkerv1.NodeCommand{
 		CommandId: "delete-1",
 		Directive: &tinkerv1.NodeCommand_DeleteArtifact{
 			DeleteArtifact: &tinkerv1.DeleteArtifact{
@@ -120,6 +120,32 @@ func TestHandleCommandDeletesArtifacts(t *testing.T) {
 	}
 	if !store.Has(roots["root-b"]) {
 		t.Fatal("root-b was deleted")
+	}
+}
+
+func TestCommandLifecycleEvents(t *testing.T) {
+	cmd := &tinkerv1.NodeCommand{
+		CommandId:   "cmd-1",
+		LeaseId:     "lease-1",
+		OperationId: "op-1",
+		Kind:        "optim_step",
+	}
+	started := commandEventStarted("node-1", cmd)
+	if started.GetStarted() == nil {
+		t.Fatalf("started event payload = %#v", started.GetPayload())
+	}
+	completed := commandEventCompleted("node-1", cmd, &tinkerv1.OperationResult{OperationId: "op-1"})
+	if completed.GetCompleted().GetResult().GetOperationId() != "op-1" {
+		t.Fatalf("completed event = %#v", completed)
+	}
+	failed := commandFailedEvent("node-1", cmd, "canceled", "stop", false)
+	if failed.GetFailed().GetError().GetCode() != "canceled" || failed.GetFailed().GetError().GetRetryable() {
+		t.Fatalf("failed event = %#v", failed)
+	}
+	for _, event := range []*tinkerv1.NodeEvent{started, completed, failed} {
+		if event.GetNodeId() != "node-1" || event.GetCommandId() != "cmd-1" || event.GetLeaseId() != "lease-1" || event.GetOperationId() != "op-1" || event.GetKind() != "optim_step" {
+			t.Fatalf("event metadata = %#v", event)
+		}
 	}
 }
 
