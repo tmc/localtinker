@@ -120,7 +120,7 @@ func runNode(args []string) error {
 	log.Printf("registered node %s with coordinator %s", nodeID, reg.Msg.GetCoordinatorId())
 	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
-	go watchCommands(runCtx, client, store, nodeID, reg.Msg.GetCoordinatorId(), cancelRun)
+	go watchCommands(runCtx, client, store, runtime, nodeID, reg.Msg.GetCoordinatorId(), cancelRun)
 
 	if artifacts, err := artifactInventory(store); err == nil {
 		resp, err := client.Heartbeat(runCtx, connect.NewRequest(&tinkerv1.HeartbeatRequest{
@@ -186,7 +186,7 @@ func runNode(args []string) error {
 	}
 }
 
-func watchCommands(ctx context.Context, client tinkerv1connect.TinkerCoordinatorClient, store *tinkerartifact.Store, nodeID, coordinatorID string, cancel context.CancelFunc) {
+func watchCommands(ctx context.Context, client tinkerv1connect.TinkerCoordinatorClient, store *tinkerartifact.Store, runtime *tinkernode.Runtime, nodeID, coordinatorID string, cancel context.CancelFunc) {
 	for {
 		stream, err := client.Watch(ctx, connect.NewRequest(&tinkerv1.WatchRequest{
 			NodeId:        nodeID,
@@ -207,7 +207,7 @@ func watchCommands(ctx context.Context, client tinkerv1connect.TinkerCoordinator
 			if err := reportCommandAck(ctx, client, nodeID, cmd); err != nil {
 				log.Printf("ack command %s: %v", cmd.GetCommandId(), err)
 			}
-			done, err := handleCommand(store, cmd, cancel)
+			done, err := handleCommand(ctx, client, store, runtime, nodeID, cmd, cancel)
 			if err != nil {
 				log.Printf("command %s: %v", cmd.GetCommandId(), err)
 			}
@@ -224,11 +224,38 @@ func watchCommands(ctx context.Context, client tinkerv1connect.TinkerCoordinator
 	}
 }
 
-func handleCommand(store *tinkerartifact.Store, cmd *tinkerv1.NodeCommand, cancel context.CancelFunc) (bool, error) {
+func handleCommand(ctx context.Context, client tinkerv1connect.TinkerCoordinatorClient, store *tinkerartifact.Store, runtime *tinkernode.Runtime, nodeID string, cmd *tinkerv1.NodeCommand, cancel context.CancelFunc) (bool, error) {
+	if cmd.GetRun() != nil {
+		if runtime == nil {
+			return false, fmt.Errorf("node runtime is not configured")
+		}
+		return false, runCommand(ctx, client, runtime, nodeID, cmd)
+	}
 	if cmd.GetDrain() != nil {
 		log.Printf("drain command %s: %s", cmd.GetCommandId(), cmd.GetDrain().GetReason())
+		if runtime != nil {
+			if _, err := runtime.Drain(ctx, connect.NewRequest(&tinkerv1.DrainRequest{
+				NodeId:     nodeID,
+				Reason:     cmd.GetDrain().GetReason(),
+				Checkpoint: cmd.GetDrain().GetCheckpoint(),
+			})); err != nil {
+				return false, err
+			}
+		}
 		cancel()
 		return true, nil
+	}
+	if revoke := cmd.GetRevoke(); revoke != nil {
+		if runtime == nil {
+			return false, fmt.Errorf("node runtime is not configured")
+		}
+		return false, revokeCommand(ctx, client, runtime, nodeID, cmd, revoke.GetReason())
+	}
+	if ack := cmd.GetAckOperation(); ack != nil {
+		if runtime != nil {
+			return false, runtime.Acknowledge(ctx, ack.GetOperationIds()...)
+		}
+		return false, nil
 	}
 	if retention := cmd.GetArtifactRetention(); retention != nil {
 		return false, applyRetention(store, retention)
@@ -238,6 +265,37 @@ func handleCommand(store *tinkerartifact.Store, cmd *tinkerv1.NodeCommand, cance
 	}
 	log.Printf("unsupported command %s kind %q", cmd.GetCommandId(), cmd.GetKind())
 	return false, nil
+}
+
+func runCommand(ctx context.Context, client tinkerv1connect.TinkerCoordinatorClient, runtime *tinkernode.Runtime, nodeID string, cmd *tinkerv1.NodeCommand) error {
+	if err := reportCommandEvent(ctx, client, commandEventStarted(nodeID, cmd)); err != nil {
+		return err
+	}
+	resp, err := runtime.Run(ctx, connect.NewRequest(cmd))
+	if err != nil {
+		return reportCommandEvent(ctx, client, commandFailedEvent(nodeID, cmd, "run_failed", err.Error(), true))
+	}
+	if result := resp.Msg; result.GetError() != nil {
+		return reportCommandEvent(ctx, client, commandEventFailed(nodeID, cmd, result.GetError()))
+	}
+	return reportCommandEvent(ctx, client, commandEventCompleted(nodeID, cmd, resp.Msg))
+}
+
+func revokeCommand(ctx context.Context, client tinkerv1connect.TinkerCoordinatorClient, runtime *tinkernode.Runtime, nodeID string, cmd *tinkerv1.NodeCommand, reason string) error {
+	resp, err := runtime.Cancel(ctx, connect.NewRequest(&tinkerv1.CancelRequest{
+		LeaseId:     cmd.GetLeaseId(),
+		OperationId: cmd.GetOperationId(),
+	}))
+	if err != nil {
+		return reportCommandEvent(ctx, client, commandFailedEvent(nodeID, cmd, "cancel_failed", err.Error(), true))
+	}
+	if !resp.Msg.GetCanceled() {
+		return nil
+	}
+	if reason == "" {
+		reason = "operation canceled"
+	}
+	return reportCommandEvent(ctx, client, commandFailedEvent(nodeID, cmd, "canceled", reason, false))
 }
 
 func applyRetention(store *tinkerartifact.Store, retention *tinkerv1.ApplyArtifactRetention) error {
@@ -292,20 +350,55 @@ func deleteArtifacts(store *tinkerartifact.Store, roots []string) error {
 }
 
 func reportCommandAck(ctx context.Context, client tinkerv1connect.TinkerCoordinatorClient, nodeID string, cmd *tinkerv1.NodeCommand) error {
+	event := baseCommandEvent(nodeID, cmd)
+	event.Payload = &tinkerv1.NodeEvent_Ack{Ack: &tinkerv1.CommandAck{}}
+	return reportCommandEvent(ctx, client, event)
+}
+
+func reportCommandEvent(ctx context.Context, client tinkerv1connect.TinkerCoordinatorClient, event *tinkerv1.NodeEvent) error {
 	stream := client.Report(ctx)
-	if err := stream.Send(&tinkerv1.NodeEvent{
+	if err := stream.Send(event); err != nil {
+		return err
+	}
+	_, err := stream.CloseAndReceive()
+	return err
+}
+
+func commandEventStarted(nodeID string, cmd *tinkerv1.NodeCommand) *tinkerv1.NodeEvent {
+	event := baseCommandEvent(nodeID, cmd)
+	event.Payload = &tinkerv1.NodeEvent_Started{Started: &tinkerv1.OperationStarted{}}
+	return event
+}
+
+func commandEventCompleted(nodeID string, cmd *tinkerv1.NodeCommand, result *tinkerv1.OperationResult) *tinkerv1.NodeEvent {
+	event := baseCommandEvent(nodeID, cmd)
+	event.Payload = &tinkerv1.NodeEvent_Completed{Completed: &tinkerv1.OperationCompleted{Result: result}}
+	return event
+}
+
+func commandEventFailed(nodeID string, cmd *tinkerv1.NodeCommand, err *tinkerv1.ErrorInfo) *tinkerv1.NodeEvent {
+	event := baseCommandEvent(nodeID, cmd)
+	event.Payload = &tinkerv1.NodeEvent_Failed{Failed: &tinkerv1.OperationFailed{Error: err}}
+	return event
+}
+
+func baseCommandEvent(nodeID string, cmd *tinkerv1.NodeCommand) *tinkerv1.NodeEvent {
+	return &tinkerv1.NodeEvent{
 		NodeId:      nodeID,
 		CommandId:   cmd.GetCommandId(),
 		LeaseId:     cmd.GetLeaseId(),
 		OperationId: cmd.GetOperationId(),
 		Kind:        cmd.GetKind(),
 		UnixNano:    time.Now().UnixNano(),
-		Payload:     &tinkerv1.NodeEvent_Ack{Ack: &tinkerv1.CommandAck{}},
-	}); err != nil {
-		return err
 	}
-	_, err := stream.CloseAndReceive()
-	return err
+}
+
+func commandFailedEvent(nodeID string, cmd *tinkerv1.NodeCommand, code, message string, retryable bool) *tinkerv1.NodeEvent {
+	return commandEventFailed(nodeID, cmd, &tinkerv1.ErrorInfo{
+		Code:      code,
+		Message:   message,
+		Retryable: retryable,
+	})
 }
 
 func sleepContext(ctx context.Context, d time.Duration) bool {

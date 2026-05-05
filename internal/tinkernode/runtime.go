@@ -98,6 +98,19 @@ func (r *Runtime) ActiveLeases() int32 {
 	return int32(len(r.active))
 }
 
+// Acknowledge evicts cached terminal results after coordinator acknowledgement.
+func (r *Runtime) Acknowledge(ctx context.Context, operationIDs ...string) error {
+	for _, operationID := range operationIDs {
+		if operationID == "" {
+			continue
+		}
+		if err := r.cache.Acknowledge(ctx, operationID); err != nil && !errors.Is(err, ErrResultNotFound) {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *Runtime) Run(ctx context.Context, req *connect.Request[tinkerv1.NodeCommand]) (*connect.Response[tinkerv1.OperationResult], error) {
 	cmd := req.Msg
 	operationID := cmd.GetOperationId()
