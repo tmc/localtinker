@@ -30,7 +30,7 @@ type mlxModel struct {
 	adapters *tuner.Set
 	rank     int
 	step     int
-	pending  []training.TrainingSample
+	pending  denseBatch
 	lastLoss float64
 }
 
@@ -90,7 +90,7 @@ func resolveMLXBase(base string) string {
 }
 
 func (m *mlxModel) forwardBackward(ctx context.Context, input ForwardBackwardInput, backward bool) (ForwardBackwardOutput, error) {
-	samples, tokens, err := trainingSamples(input)
+	batch, err := newDenseBatch(input)
 	if err != nil {
 		return ForwardBackwardOutput{}, err
 	}
@@ -98,21 +98,21 @@ func (m *mlxModel) forwardBackward(ctx context.Context, input ForwardBackwardInp
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	loss, err := training.EvaluateWithAdaptersSamples(m, samples, noopTokenizer{}, len(samples), 1, maxSampleLen(samples), false, false, true)
+	out, err := m.evaluateDenseBatch(ctx, batch)
 	if err != nil {
-		return ForwardBackwardOutput{}, fmt.Errorf("forward: %w", err)
+		return ForwardBackwardOutput{}, err
 	}
-	m.lastLoss = float64(loss)
+	m.lastLoss = out.loss
 	if backward {
-		m.pending = samples
+		m.pending = batch
 	}
 	return ForwardBackwardOutput{
 		LossFnOutputType: "TensorData",
-		LossFnOutputs:    lossOutputs(samples),
+		LossFnOutputs:    out.lossOutputs,
 		Metrics: map[string]float64{
-			"loss:mean":    float64(loss),
-			"tokens:sum":   float64(tokens),
-			"examples:sum": float64(len(samples)),
+			"loss:mean":    out.loss,
+			"tokens:sum":   batch.weightSum,
+			"examples:sum": float64(len(batch.rows)),
 		},
 	}, nil
 }
@@ -120,7 +120,7 @@ func (m *mlxModel) forwardBackward(ctx context.Context, input ForwardBackwardInp
 func (m *mlxModel) optimStep(ctx context.Context, params AdamParams) (OptimStepOutput, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if len(m.pending) == 0 {
+	if len(m.pending.rows) == 0 {
 		return OptimStepOutput{}, fmt.Errorf("optimizer step: no pending forward_backward")
 	}
 
@@ -128,37 +128,11 @@ func (m *mlxModel) optimStep(ctx context.Context, params AdamParams) (OptimStepO
 	if lr == 0 {
 		lr = 1e-4
 	}
-	trainParams := training.DefaultTrainParameters()
-	trainParams.BatchSize = len(m.pending)
-	trainParams.Iterations = 1
-	trainParams.StepsPerReport = 1
-	trainParams.StepsPerEval = 0
-	trainParams.ValidationBatches = 0
-	trainParams.SaveEvery = 1 << 30
-	trainParams.AdapterPath = ""
-	trainParams.LearningRate = float32(lr)
-	trainParams.WeightDecay = float32(params.WeightDecay)
-	trainParams.MaxGradNorm = float32(params.GradClipNorm)
-	trainParams.MaxSeqLength = maxSampleLen(m.pending)
-	trainParams.AppendEOS = false
-	trainParams.BatchOrder = "input"
-	trainParams.DataSeed = 0
-	trainParams.Optimizer = "adamw"
-	trainParams.LossType = "cross-entropy"
-	trainParams.FullEval = false
-	trainParams.MaskPrompt = true
-
-	loss := m.lastLoss
-	err := training.TrainWithSetSamples(m, m.adapters, m.pending, nil, noopTokenizer{}, trainParams, func(p training.Progress) training.ProgressDisposition {
-		if p.Type == training.ProgressTrain {
-			loss = float64(p.Loss)
-		}
-		return training.ProgressMore
-	})
+	loss, err := m.trainDenseStep(ctx, m.pending, params, lr)
 	if err != nil {
 		return OptimStepOutput{}, fmt.Errorf("optimizer step: %w", err)
 	}
-	m.pending = nil
+	m.pending = denseBatch{}
 	m.lastLoss = loss
 	m.step++
 
@@ -331,77 +305,265 @@ func (m *mlxModel) Forward(ctx context.Context, input *mlx.Array, cache interfac
 	return logits, next, nil
 }
 
-func trainingSamples(input ForwardBackwardInput) ([]training.TrainingSample, int, error) {
+type denseBatch struct {
+	rows      []denseRow
+	seqLen    int
+	weightSum float64
+}
+
+type denseRow struct {
+	tokens      []int32
+	targets     []int32
+	weights     []float32
+	outputShape []int
+}
+
+type denseEvalOutput struct {
+	loss        float64
+	lossOutputs []map[string]Tensor
+}
+
+func newDenseBatch(input ForwardBackwardInput) (denseBatch, error) {
 	if input.LossFn != "cross_entropy" {
-		return nil, 0, fmt.Errorf("unsupported loss function %q", input.LossFn)
+		return denseBatch{}, fmt.Errorf("unsupported loss function %q", input.LossFn)
 	}
 	if len(input.Data) == 0 {
-		return nil, 0, fmt.Errorf("no data")
+		return denseBatch{}, fmt.Errorf("no data")
 	}
-	samples := make([]training.TrainingSample, 0, len(input.Data))
-	var tokensTotal int
+	var batch denseBatch
+	batch.rows = make([]denseRow, 0, len(input.Data))
 	for i, datum := range input.Data {
 		tokens := datum.ModelInput.tokens()
 		targets, err := datum.targets()
 		if err != nil {
-			return nil, 0, err
+			return denseBatch{}, fmt.Errorf("datum %d: %w", i, err)
 		}
 		weights, err := datum.weights(len(targets))
 		if err != nil {
-			return nil, 0, err
+			return denseBatch{}, fmt.Errorf("datum %d: %w", i, err)
 		}
-		promptOffset, err := promptOffsetFromWeights(weights)
-		if err != nil {
-			return nil, 0, fmt.Errorf("datum %d: %w", i, err)
-		}
-		activeTokens := len(weights) - promptOffset + 1
 		if len(tokens) != len(targets) {
-			return nil, 0, fmt.Errorf("datum %d input tokens=%d target tokens=%d", i, len(tokens), len(targets))
+			return denseBatch{}, fmt.Errorf("datum %d input tokens=%d target tokens=%d", i, len(tokens), len(targets))
 		}
 		if len(tokens) == 0 {
-			return nil, 0, fmt.Errorf("datum %d has no tokens", i)
+			return denseBatch{}, fmt.Errorf("datum %d has no tokens", i)
 		}
-		for j := 1; j < len(tokens); j++ {
-			if tokens[j] != targets[j-1] {
-				return nil, 0, fmt.Errorf("datum %d target_tokens must be model_input shifted left by one token", i)
+		row := denseRow{
+			tokens:      int32s(tokens),
+			targets:     int32s(targets),
+			weights:     float32s(weights),
+			outputShape: tensorShape(datum.LossFnInputs["target_tokens"], len(targets)),
+		}
+		for _, w := range weights {
+			if w > 0 {
+				batch.weightSum += float64(w)
 			}
 		}
-		full := make([]int32, 0, len(tokens)+1)
-		for _, token := range tokens {
-			full = append(full, int32(token))
+		if len(tokens) > batch.seqLen {
+			batch.seqLen = len(tokens)
 		}
-		full = append(full, int32(targets[len(targets)-1]))
-		samples = append(samples, training.TrainingSample{Tokens: full, PromptOffset: promptOffset})
-		tokensTotal += activeTokens
+		batch.rows = append(batch.rows, row)
 	}
-	return samples, tokensTotal, nil
+	if batch.weightSum == 0 {
+		return denseBatch{}, fmt.Errorf("zero total weight")
+	}
+	return batch, nil
 }
 
-func maxSampleLen(samples []training.TrainingSample) int {
-	n := 0
-	for _, sample := range samples {
-		if len(sample.Tokens) > n {
-			n = len(sample.Tokens)
-		}
+func tensorShape(t TensorData, n int) []int {
+	if len(t.Shape) == 0 {
+		return []int{n}
 	}
-	if n < 2 {
-		return 2
-	}
-	return n
+	return append([]int(nil), t.Shape...)
 }
 
-func lossOutputs(samples []training.TrainingSample) []map[string]Tensor {
-	out := make([]map[string]Tensor, 0, len(samples))
-	for _, sample := range samples {
-		n := len(sample.Tokens) - 1
-		if n < 0 {
-			n = 0
-		}
-		out = append(out, map[string]Tensor{
-			"logprobs": {Data: make([]float64, n), DType: "float32", Shape: []int{n}},
-		})
+func int32s(in []int) []int32 {
+	out := make([]int32, len(in))
+	for i, v := range in {
+		out[i] = int32(v)
 	}
 	return out
+}
+
+func float32s(in []float64) []float32 {
+	out := make([]float32, len(in))
+	for i, v := range in {
+		out[i] = float32(v)
+	}
+	return out
+}
+
+func (b denseBatch) arrays() (inputs, targets, weights *mlx.Array, err error) {
+	inputData := make([]int32, len(b.rows)*b.seqLen)
+	targetData := make([]int32, len(b.rows)*b.seqLen)
+	weightData := make([]float32, len(b.rows)*b.seqLen)
+	for i, row := range b.rows {
+		base := i * b.seqLen
+		copy(inputData[base:base+len(row.tokens)], row.tokens)
+		copy(targetData[base:base+len(row.targets)], row.targets)
+		copy(weightData[base:base+len(row.weights)], row.weights)
+	}
+	inputs, err = mlx.FromSlice(inputData, []int{len(b.rows), b.seqLen}, mlx.Int32)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("inputs: %w", err)
+	}
+	targets, err = mlx.FromSlice(targetData, []int{len(b.rows), b.seqLen}, mlx.Int32)
+	if err != nil {
+		inputs.Free()
+		return nil, nil, nil, fmt.Errorf("targets: %w", err)
+	}
+	weights, err = mlx.FromSlice(weightData, []int{len(b.rows), b.seqLen}, mlx.Float32)
+	if err != nil {
+		inputs.Free()
+		targets.Free()
+		return nil, nil, nil, fmt.Errorf("weights: %w", err)
+	}
+	return inputs, targets, weights, nil
+}
+
+func (m *mlxModel) evaluateDenseBatch(ctx context.Context, batch denseBatch) (denseEvalOutput, error) {
+	inputs, targets, weights, err := batch.arrays()
+	if err != nil {
+		return denseEvalOutput{}, err
+	}
+	defer inputs.Free()
+	defer targets.Free()
+	defer weights.Free()
+
+	logits, _ := m.bundle.Model.Forward(ctx, inputs, nil)
+	defer logits.Free()
+
+	loss, logprobs, err := denseCrossEntropy(logits, targets, weights)
+	if err != nil {
+		return denseEvalOutput{}, err
+	}
+	defer loss.Free()
+	defer logprobs.Free()
+	logprobs32 := mlx.Astype(logprobs, mlx.Float32)
+	defer logprobs32.Free()
+	if err := mlx.Eval(loss, logprobs32); err != nil {
+		return denseEvalOutput{}, fmt.Errorf("eval: %w", err)
+	}
+
+	loss32, err := mlx.ItemAs[float32](loss)
+	if err != nil {
+		return denseEvalOutput{}, fmt.Errorf("loss: %w", err)
+	}
+	all, err := mlx.ToSlice[float32](logprobs32)
+	if err != nil {
+		return denseEvalOutput{}, fmt.Errorf("logprobs: %w", err)
+	}
+	out := denseEvalOutput{
+		loss:        float64(loss32),
+		lossOutputs: make([]map[string]Tensor, 0, len(batch.rows)),
+	}
+	for i, row := range batch.rows {
+		data := make([]float64, len(row.targets))
+		offset := i * batch.seqLen
+		for j := range row.targets {
+			data[j] = float64(all[offset+j])
+		}
+		out.lossOutputs = append(out.lossOutputs, map[string]Tensor{
+			"logprobs": {Data: data, DType: "float32", Shape: row.outputShape},
+		})
+	}
+	return out, nil
+}
+
+func (m *mlxModel) trainDenseStep(ctx context.Context, batch denseBatch, params AdamParams, lr float64) (float64, error) {
+	inputs, targets, weights, err := batch.arrays()
+	if err != nil {
+		return 0, err
+	}
+	defer inputs.Free()
+	defer targets.Free()
+	defer weights.Free()
+
+	trainable := m.adapters.Trainable()
+	if len(trainable) == 0 {
+		return 0, fmt.Errorf("no trainable parameters")
+	}
+	lossFn := func(ctx context.Context, adapterParams, extraInputs []*mlx.Array) (*mlx.Array, error) {
+		m.adapters.UpdateParams(adapterParams)
+		logits, _ := m.bundle.Model.Forward(ctx, extraInputs[0], nil)
+		defer logits.Free()
+		loss, _, err := denseCrossEntropy(logits, extraInputs[1], extraInputs[2])
+		return loss, err
+	}
+	trainParams := training.DefaultTrainParameters()
+	trainParams.Optimizer = "adamw"
+	trainParams.TrainingMode = "separate"
+	trainParams.LearningRate = float32(lr)
+	trainParams.WeightDecay = float32(params.WeightDecay)
+	trainParams.MaxGradNorm = float32(params.GradClipNorm)
+
+	step, err := training.NewTrainingStep(len(trainable), 3, lossFn, trainParams)
+	if err != nil {
+		return 0, err
+	}
+	defer step.Free()
+	step.InitState(trainable)
+
+	lrTensor := mlx.NewScalar(float32(lr))
+	defer lrTensor.Free()
+	loss := step.Step(training.NewTrainingContext(len(trainable), 3), []*mlx.Array{inputs, targets, weights}, lrTensor)
+	defer loss.Free()
+	updated := step.GetParams()
+	eval := append(append([]*mlx.Array{}, updated...), loss)
+	if err := mlx.Eval(eval...); err != nil {
+		return 0, fmt.Errorf("eval: %w", err)
+	}
+	m.adapters.UpdateParams(updated)
+	loss32, err := mlx.ItemAs[float32](loss)
+	if err != nil {
+		return 0, fmt.Errorf("loss: %w", err)
+	}
+	return float64(loss32), nil
+}
+
+func denseCrossEntropy(logits, targets, weights *mlx.Array) (loss, logprobs *mlx.Array, err error) {
+	logitShape := logits.Shape()
+	targetShape := targets.Shape()
+	weightShape := weights.Shape()
+	if len(logitShape) != 3 {
+		return nil, nil, fmt.Errorf("logits shape %v, want [batch seq vocab]", logitShape)
+	}
+	if len(targetShape) != 2 {
+		return nil, nil, fmt.Errorf("targets shape %v, want [batch seq]", targetShape)
+	}
+	if len(weightShape) != 2 {
+		return nil, nil, fmt.Errorf("weights shape %v, want [batch seq]", weightShape)
+	}
+	if logitShape[0] != targetShape[0] || logitShape[1] != targetShape[1] {
+		return nil, nil, fmt.Errorf("logits shape %v does not match targets shape %v", logitShape, targetShape)
+	}
+	if targetShape[0] != weightShape[0] || targetShape[1] != weightShape[1] {
+		return nil, nil, fmt.Errorf("weights shape %v does not match targets shape %v", weightShape, targetShape)
+	}
+	if logitShape[2] == 0 {
+		return nil, nil, fmt.Errorf("logits shape %v has empty vocab", logitShape)
+	}
+	targetsExp := mlx.ExpandDims(targets, -1)
+	defer targetsExp.Free()
+	score := mlx.TakeAlongAxis(logits, targetsExp, -1)
+	defer score.Free()
+	selected := mlx.SqueezeAxis(score, -1)
+	defer selected.Free()
+
+	logsumexp := mlx.LogsumexpAxis(logits, -1, false)
+	defer logsumexp.Free()
+	logprobs = mlx.Subtract(selected, logsumexp)
+
+	negLogprobs := mlx.MultiplyScalar(logprobs, float32(-1))
+	defer negLogprobs.Free()
+	weighted := mlx.Multiply(negLogprobs, weights)
+	defer weighted.Free()
+	total := mlx.Sum(weighted, false)
+	defer total.Free()
+	weightTotal := mlx.Sum(weights, false)
+	defer weightTotal.Free()
+	loss = mlx.Divide(total, weightTotal)
+	return loss, logprobs, nil
 }
 
 func cleanName(name string) string {

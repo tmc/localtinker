@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 )
 
@@ -288,6 +289,12 @@ func (d Datum) targets() ([]int, error) {
 	}
 	out := make([]int, len(target.Data))
 	for i, v := range target.Data {
+		if math.Trunc(v) != v {
+			return nil, fmt.Errorf("target_tokens[%d] = %v is not an integer", i, v)
+		}
+		if v < 0 || v > float64(math.MaxInt32) {
+			return nil, fmt.Errorf("target_tokens[%d] = %v is out of range", i, v)
+		}
 		out[i] = int(v)
 	}
 	return out, nil
@@ -307,6 +314,11 @@ func (d Datum) weights(n int) ([]float64, error) {
 	}
 	if len(weight.Data) != n {
 		return nil, fmt.Errorf("weights=%d target tokens=%d", len(weight.Data), n)
+	}
+	for i, v := range weight.Data {
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+			return nil, fmt.Errorf("weights[%d] = %v is not a non-negative finite number", i, v)
+		}
 	}
 	return append([]float64(nil), weight.Data...), nil
 }
