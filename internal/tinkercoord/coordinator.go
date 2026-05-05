@@ -220,7 +220,7 @@ func New(cfg Config) (*Coordinator, error) {
 		leaseTimeout:    cfg.LeaseTimeout,
 		sem:             make(chan struct{}, cfg.MaxOperations),
 	}
-	c.recoverRunning(context.Background())
+	c.recoverUnfinished(context.Background())
 	c.dispatchQueued(context.Background())
 	return c, nil
 }
@@ -916,18 +916,20 @@ func systemError(err error) map[string]any {
 	return map[string]any{"code": "system_error", "message": err.Error()}
 }
 
-func (c *Coordinator) recoverRunning(ctx context.Context) {
+func (c *Coordinator) recoverUnfinished(ctx context.Context) {
 	futures, err := c.store.ListFutures(ctx)
 	if err != nil {
 		return
 	}
 	for _, future := range futures {
-		if future.State != FutureRunning {
+		switch future.State {
+		case FutureQueued, FutureRunning:
+		default:
 			continue
 		}
 		_ = c.finishFuture(ctx, future, nil, map[string]any{
 			"code":    "system_error",
-			"message": "operation lease expired during coordinator restart",
+			"message": "operation did not finish before coordinator restart",
 		}, FutureSystemError)
 	}
 }
