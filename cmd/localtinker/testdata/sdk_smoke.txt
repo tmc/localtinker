@@ -3,6 +3,12 @@ stdout 'SDK_SMOKE_OK'
 
 -- sdk_smoke.py --
 import tinker
+import os
+import tarfile
+from pathlib import Path
+from urllib.parse import unquote, urlparse
+
+import httpx
 from tinker import ServiceClient
 
 
@@ -39,6 +45,18 @@ try:
     assert saved.path.startswith("tinker://"), saved
     loaded = training.load_state(saved.path).result(timeout=120)
     assert loaded.path == saved.path, loaded
+    with httpx.Client(base_url=os.environ["TINKER_BASE_URL"], timeout=120) as raw:
+        resp = raw.post(
+            "/api/v1/load_state_with_optimizer",
+            json={"model_id": info.model_id, "path": saved.path},
+        )
+        resp.raise_for_status()
+        future_id = resp.json()["request_id"]
+        resp = raw.post("/api/v1/retrieve_future", json={"future_id": future_id})
+        resp.raise_for_status()
+        resumed = resp.json()
+    assert resumed["path"] == saved.path, resumed
+    assert resumed["optimizer_state"] is True, resumed
 
     sampler_saved = training.save_weights_for_sampler("sdk-smoke-sampler").result(timeout=120)
     sampler = training.create_sampling_client(sampler_saved.path)
@@ -48,6 +66,30 @@ try:
         tinker.SamplingParams(max_tokens=1, temperature=0),
     ).result(timeout=120)
     assert len(sample.sequences) == 1 and len(sample.sequences[0].tokens) == 1, sample
+    seq = sample.sequences[0]
+    assert len(seq.logprobs) == len(seq.tokens), sample
+    with httpx.Client(base_url=os.environ["TINKER_BASE_URL"], timeout=120) as raw:
+        req = {
+            "model_path": sampler_saved.path,
+            "num_samples": 1,
+            "prompt": {"chunks": [{"type": "encoded_text", "tokens": [1, 1, 1]}]},
+            "sampling_params": {"max_tokens": 1, "temperature": 0, "seed": 7, "prompt_logprobs": True},
+        }
+        first = raw.post("/api/v1/asample", json=req)
+        first.raise_for_status()
+        first_future = first.json()["request_id"]
+        first = raw.post("/api/v1/retrieve_future", json={"future_id": first_future})
+        first.raise_for_status()
+        first = first.json()
+        second = raw.post("/api/v1/asample", json=req)
+        second.raise_for_status()
+        second_future = second.json()["request_id"]
+        second = raw.post("/api/v1/retrieve_future", json={"future_id": second_future})
+        second.raise_for_status()
+        second = second.json()
+    assert first["sequences"][0]["tokens"] == second["sequences"][0]["tokens"], (first, second)
+    assert len(first["sequences"][0]["logprobs"]) == len(first["sequences"][0]["tokens"]), first
+    assert len(first["prompt_logprobs"]) == 3, first
 
     rest = client.create_rest_client()
     weights_info = rest.get_weights_info_by_tinker_path(saved.path).result(timeout=120)
@@ -60,6 +102,14 @@ try:
     assert any(c.tinker_path == saved.path for c in user_checkpoints.checkpoints), user_checkpoints
     archive = rest.get_checkpoint_archive_url_from_tinker_path(saved.path).result(timeout=120)
     assert archive.url.startswith("file://"), archive
+    archive_path = Path(unquote(urlparse(archive.url).path))
+    assert archive_path.is_file(), archive
+    with tarfile.open(archive_path) as tf:
+        names = set(tf.getnames())
+    assert "adapters.safetensors" in names, names
+    assert "checkpoint.json" in names, names
+    assert "optimizer_state.json" in names, names
+    assert "complete" in names, names
     rest.publish_checkpoint_from_tinker_path(saved.path).result(timeout=120)
     rest.unpublish_checkpoint_from_tinker_path(saved.path).result(timeout=120)
     rest.set_checkpoint_ttl_from_tinker_path(saved.path, 3600).result(timeout=120)
