@@ -136,6 +136,9 @@ func (m *mlxModel) forwardBackward(ctx context.Context, input ForwardBackwardInp
 	if err != nil {
 		return ForwardBackwardOutput{}, err
 	}
+	if backward && batch.weightSum == 0 {
+		return ForwardBackwardOutput{}, fmt.Errorf("zero total weight")
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -616,9 +619,6 @@ func newDenseBatch(input ForwardBackwardInput) (denseBatch, error) {
 		}
 		batch.rows = append(batch.rows, row)
 	}
-	if batch.weightSum == 0 {
-		return denseBatch{}, fmt.Errorf("zero total weight")
-	}
 	return batch, nil
 }
 
@@ -685,28 +685,41 @@ func (m *mlxModel) evaluateDenseBatch(ctx context.Context, batch denseBatch) (de
 	logits, _ := m.bundle.Model.Forward(ctx, inputs, nil)
 	defer logits.Free()
 
-	loss, logprobs, err := denseCrossEntropy(logits, targets, weights)
+	var lossValue float64
+	var logprobs *mlx.Array
+	if batch.weightSum == 0 {
+		logprobs, err = denseLogprobs(logits, targets)
+	} else {
+		var loss *mlx.Array
+		loss, logprobs, err = denseCrossEntropy(logits, targets, weights)
+		if err == nil {
+			defer loss.Free()
+			if err := mlx.Eval(loss); err != nil {
+				return denseEvalOutput{}, fmt.Errorf("eval: %w", err)
+			}
+			loss32, err := mlx.ItemAs[float32](loss)
+			if err != nil {
+				return denseEvalOutput{}, fmt.Errorf("loss: %w", err)
+			}
+			lossValue = float64(loss32)
+		}
+	}
 	if err != nil {
 		return denseEvalOutput{}, err
 	}
-	defer loss.Free()
 	defer logprobs.Free()
 	logprobs32 := mlx.Astype(logprobs, mlx.Float32)
 	defer logprobs32.Free()
-	if err := mlx.Eval(loss, logprobs32); err != nil {
+	if err := mlx.Eval(logprobs32); err != nil {
 		return denseEvalOutput{}, fmt.Errorf("eval: %w", err)
 	}
 
-	loss32, err := mlx.ItemAs[float32](loss)
-	if err != nil {
-		return denseEvalOutput{}, fmt.Errorf("loss: %w", err)
-	}
 	all, err := mlx.ToSlice[float32](logprobs32)
 	if err != nil {
 		return denseEvalOutput{}, fmt.Errorf("logprobs: %w", err)
 	}
 	out := denseEvalOutput{
-		loss:        float64(loss32),
+		loss:        lossValue,
 		lossOutputs: make([]map[string]Tensor, 0, len(batch.rows)),
 	}
 	for i, row := range batch.rows {
@@ -778,38 +791,20 @@ func (m *mlxModel) trainDenseStep(ctx context.Context, batch denseBatch, params 
 }
 
 func denseCrossEntropy(logits, targets, weights *mlx.Array) (loss, logprobs *mlx.Array, err error) {
-	logitShape := logits.Shape()
-	targetShape := targets.Shape()
+	logprobs, err = denseLogprobs(logits, targets)
+	if err != nil {
+		return nil, nil, err
+	}
 	weightShape := weights.Shape()
-	if len(logitShape) != 3 {
-		return nil, nil, fmt.Errorf("logits shape %v, want [batch seq vocab]", logitShape)
-	}
-	if len(targetShape) != 2 {
-		return nil, nil, fmt.Errorf("targets shape %v, want [batch seq]", targetShape)
-	}
+	targetShape := targets.Shape()
 	if len(weightShape) != 2 {
+		logprobs.Free()
 		return nil, nil, fmt.Errorf("weights shape %v, want [batch seq]", weightShape)
 	}
-	if logitShape[0] != targetShape[0] || logitShape[1] != targetShape[1] {
-		return nil, nil, fmt.Errorf("logits shape %v does not match targets shape %v", logitShape, targetShape)
-	}
 	if targetShape[0] != weightShape[0] || targetShape[1] != weightShape[1] {
+		logprobs.Free()
 		return nil, nil, fmt.Errorf("weights shape %v does not match targets shape %v", weightShape, targetShape)
 	}
-	if logitShape[2] == 0 {
-		return nil, nil, fmt.Errorf("logits shape %v has empty vocab", logitShape)
-	}
-	targetsExp := mlx.ExpandDims(targets, -1)
-	defer targetsExp.Free()
-	score := mlx.TakeAlongAxis(logits, targetsExp, -1)
-	defer score.Free()
-	selected := mlx.SqueezeAxis(score, -1)
-	defer selected.Free()
-
-	logsumexp := mlx.LogsumexpAxis(logits, -1, false)
-	defer logsumexp.Free()
-	logprobs = mlx.Subtract(selected, logsumexp)
-
 	negLogprobs := mlx.MultiplyScalar(logprobs, float32(-1))
 	defer negLogprobs.Free()
 	weighted := mlx.Multiply(negLogprobs, weights)
@@ -820,6 +815,33 @@ func denseCrossEntropy(logits, targets, weights *mlx.Array) (loss, logprobs *mlx
 	defer weightTotal.Free()
 	loss = mlx.Divide(total, weightTotal)
 	return loss, logprobs, nil
+}
+
+func denseLogprobs(logits, targets *mlx.Array) (*mlx.Array, error) {
+	logitShape := logits.Shape()
+	targetShape := targets.Shape()
+	if len(logitShape) != 3 {
+		return nil, fmt.Errorf("logits shape %v, want [batch seq vocab]", logitShape)
+	}
+	if len(targetShape) != 2 {
+		return nil, fmt.Errorf("targets shape %v, want [batch seq]", targetShape)
+	}
+	if logitShape[0] != targetShape[0] || logitShape[1] != targetShape[1] {
+		return nil, fmt.Errorf("logits shape %v does not match targets shape %v", logitShape, targetShape)
+	}
+	if logitShape[2] == 0 {
+		return nil, fmt.Errorf("logits shape %v has empty vocab", logitShape)
+	}
+	targetsExp := mlx.ExpandDims(targets, -1)
+	defer targetsExp.Free()
+	score := mlx.TakeAlongAxis(logits, targetsExp, -1)
+	defer score.Free()
+	selected := mlx.SqueezeAxis(score, -1)
+	defer selected.Free()
+
+	logsumexp := mlx.LogsumexpAxis(logits, -1, false)
+	defer logsumexp.Free()
+	return mlx.Subtract(selected, logsumexp), nil
 }
 
 func cleanName(name string) string {
