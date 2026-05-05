@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 )
 
 var (
@@ -113,11 +114,27 @@ type Datum struct {
 
 // LossInput holds typed loss data for one datum.
 type LossInput struct {
-	TargetTokens []int
-	Weights      []float32
-	Logprobs     []float32
-	Advantages   []float32
-	Mask         []bool
+	TargetTokens       []int
+	TargetTokensTensor TensorData
+	Weights            []float32
+	WeightsTensor      TensorData
+	Logprobs           []float32
+	Advantages         []float32
+	Mask               []bool
+}
+
+// TensorData is a dense tensor value passed to SDK-shaped loss inputs and
+// outputs.
+//
+// Data is row-major. When Shape is nil, validation treats the tensor as a
+// one-dimensional tensor with len(Data) elements. Sparse tensors are not
+// supported by the built-in losses.
+type TensorData struct {
+	Data              []float64
+	DType             string
+	Shape             []int
+	SparseCrowIndices []int
+	SparseColIndices  []int
 }
 
 // Loss is a built-in training loss.
@@ -159,38 +176,142 @@ func validateBatch(batch []Datum, loss Loss) error {
 		if d.Input.Len() == 0 {
 			return fmt.Errorf("datum %d input is empty", i)
 		}
-		if err := validateLossInput(d.LossInput, loss); err != nil {
+		n, err := validateLossInput(d.LossInput, loss)
+		if err != nil {
 			return fmt.Errorf("datum %d: %w", i, err)
+		}
+		if d.Input.Len() != n {
+			return fmt.Errorf("datum %d input tokens length does not match target tokens", i)
 		}
 	}
 	return nil
 }
 
-func validateLossInput(in LossInput, loss Loss) error {
+func validateLossInput(in LossInput, loss Loss) (int, error) {
+	n, targetShape, err := validateTargetTokens(in)
+	if err != nil {
+		return 0, err
+	}
+	if err := validateWeights(in, n, targetShape); err != nil {
+		return 0, err
+	}
+	switch loss.(type) {
+	case CrossEntropy:
+		return n, nil
+	case ImportanceSampling, PPO, CISPO:
+		if len(in.Logprobs) != n {
+			return 0, errors.New("logprobs length does not match target tokens")
+		}
+		if len(in.Advantages) != n {
+			return 0, errors.New("advantages length does not match target tokens")
+		}
+		if len(in.Mask) != 0 && len(in.Mask) != n {
+			return 0, errors.New("mask length does not match target tokens")
+		}
+		return n, nil
+	default:
+		return 0, fmt.Errorf("%w: loss %T", ErrUnsupported, loss)
+	}
+}
+
+func validateTargetTokens(in LossInput) (int, []int, error) {
+	hasTokens := len(in.TargetTokens) != 0
+	hasTensor := tensorDataSet(in.TargetTokensTensor)
+	if hasTokens && hasTensor {
+		return 0, nil, errors.New("target tokens and target tokens tensor are both set")
+	}
+	if hasTensor {
+		n, shape, err := validateTensorData("target tokens", in.TargetTokensTensor, "int64")
+		if err != nil {
+			return 0, nil, err
+		}
+		if n == 0 {
+			return 0, nil, errors.New("target tokens are empty")
+		}
+		for _, v := range in.TargetTokensTensor.Data {
+			if v < 0 || math.Trunc(v) != v {
+				return 0, nil, errors.New("target tokens tensor contains invalid token")
+			}
+		}
+		return n, shape, nil
+	}
 	n := len(in.TargetTokens)
 	if n == 0 {
-		return errors.New("target tokens are empty")
+		return 0, nil, errors.New("target tokens are empty")
+	}
+	for _, v := range in.TargetTokens {
+		if v < 0 {
+			return 0, nil, errors.New("target tokens contain invalid token")
+		}
+	}
+	return n, []int{n}, nil
+}
+
+func validateWeights(in LossInput, n int, targetShape []int) error {
+	hasWeights := len(in.Weights) != 0
+	hasTensor := tensorDataSet(in.WeightsTensor)
+	if hasWeights && hasTensor {
+		return errors.New("weights and weights tensor are both set")
+	}
+	if hasTensor {
+		wn, weightShape, err := validateTensorData("weights", in.WeightsTensor, "float32")
+		if err != nil {
+			return err
+		}
+		if wn != n {
+			return errors.New("weights length does not match target tokens")
+		}
+		if !sameShape(weightShape, targetShape) {
+			return errors.New("weights shape does not match target tokens")
+		}
+		return nil
 	}
 	if len(in.Weights) != 0 && len(in.Weights) != n {
 		return errors.New("weights length does not match target tokens")
 	}
-	switch loss.(type) {
-	case CrossEntropy:
-		return nil
-	case ImportanceSampling, PPO, CISPO:
-		if len(in.Logprobs) != n {
-			return errors.New("logprobs length does not match target tokens")
-		}
-		if len(in.Advantages) != n {
-			return errors.New("advantages length does not match target tokens")
-		}
-		if len(in.Mask) != 0 && len(in.Mask) != n {
-			return errors.New("mask length does not match target tokens")
-		}
-		return nil
-	default:
-		return fmt.Errorf("%w: loss %T", ErrUnsupported, loss)
+	return nil
+}
+
+func validateTensorData(name string, tensor TensorData, dtype string) (int, []int, error) {
+	if tensor.SparseCrowIndices != nil || tensor.SparseColIndices != nil {
+		return 0, nil, fmt.Errorf("%s sparse tensors are not supported", name)
 	}
+	if tensor.DType != "" && tensor.DType != dtype {
+		return 0, nil, fmt.Errorf("%s dtype %q, want %s", name, tensor.DType, dtype)
+	}
+	shape := tensor.Shape
+	if shape == nil {
+		shape = []int{len(tensor.Data)}
+	}
+	shape = append([]int(nil), shape...)
+	n := 1
+	for _, dim := range shape {
+		if dim < 0 {
+			return 0, nil, fmt.Errorf("%s shape has negative dimension", name)
+		}
+		n *= dim
+	}
+	if n != len(tensor.Data) {
+		return 0, nil, fmt.Errorf("%s shape does not match data", name)
+	}
+	return n, shape, nil
+}
+
+func tensorDataSet(t TensorData) bool {
+	return t.Data != nil || t.DType != "" || t.Shape != nil ||
+		t.SparseCrowIndices != nil || t.SparseColIndices != nil
+}
+
+func sameShape(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // AdamW configures one AdamW optimizer step.
