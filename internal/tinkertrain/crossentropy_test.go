@@ -111,6 +111,12 @@ func TestDenseCrossEntropyBatchRejectsBadTargetsAndWeights(t *testing.T) {
 				in.Data[0].LossFnInputs["weights"] = TensorData{Data: []float64{0, 0}, DType: "float32"}
 			},
 		},
+		{
+			name: "image chunk",
+			edit: func(in *ForwardBackwardInput) {
+				in.Data[0].ModelInput.Chunks = []ModelInputChunk{{Type: "image", Tokens: []int{1, 2}}}
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

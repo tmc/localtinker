@@ -762,6 +762,17 @@ func TestConformanceMalformedTrainingInputsReturnUserErrors(t *testing.T) {
 			want: "input tokens length 4 does not match target_tokens length 3",
 		},
 		{
+			name: "image chunk",
+			edit: func(d map[string]any) {
+				d["model_input"] = map[string]any{
+					"chunks": []any{
+						map[string]any{"type": "image", "tokens": []int{1, 1, 1, 1}},
+					},
+				}
+			},
+			want: `unsupported model input chunk type "image"`,
+		},
+		{
 			name: "invalid target category",
 			edit: func(d map[string]any) {
 				d["loss_fn_inputs"].(map[string]any)["target_tokens"] = map[string]any{
@@ -892,6 +903,16 @@ func TestConformanceMalformedAsyncRequestsReturnBadRequest(t *testing.T) {
 				"sampling_params":     map[string]any{"max_tokens": 1},
 			},
 			want: "prompt is empty",
+		},
+		{
+			name: "image prompt",
+			req: map[string]any{
+				"sampling_session_id": "sample-a",
+				"num_samples":         1,
+				"prompt":              map[string]any{"chunks": []any{map[string]any{"type": "image_asset_pointer"}}},
+				"sampling_params":     map[string]any{"max_tokens": 1},
+			},
+			want: `unsupported model input chunk type "image_asset_pointer"`,
 		},
 	}
 	for _, tt := range tests {

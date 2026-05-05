@@ -298,7 +298,10 @@ func (m *mlxModel) sample(ctx context.Context, req SampleRequest) (SampleOutput,
 	if numSamples <= 0 {
 		numSamples = 1
 	}
-	prompt := req.Prompt.tokens()
+	prompt, err := req.Prompt.tokens()
+	if err != nil {
+		return SampleOutput{}, fmt.Errorf("sample prompt: %w", err)
+	}
 	if len(prompt) == 0 {
 		return SampleOutput{}, fmt.Errorf("sample: empty prompt")
 	}
@@ -579,7 +582,10 @@ func newDenseBatch(input ForwardBackwardInput) (denseBatch, error) {
 	var batch denseBatch
 	batch.rows = make([]denseRow, 0, len(input.Data))
 	for i, datum := range input.Data {
-		tokens := datum.ModelInput.tokens()
+		tokens, err := datum.ModelInput.tokens()
+		if err != nil {
+			return denseBatch{}, fmt.Errorf("datum %d: %w", i, err)
+		}
 		targets, err := datum.targets()
 		if err != nil {
 			return denseBatch{}, fmt.Errorf("datum %d: %w", i, err)
