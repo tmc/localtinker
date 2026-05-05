@@ -844,6 +844,9 @@ func TestCheckpointActionsTrackMetadata(t *testing.T) {
 	if rec.Header().Get("X-Tinker-Archive-Owner") != "local" {
 		t.Fatalf("archive owner = %q", rec.Header().Get("X-Tinker-Archive-Owner"))
 	}
+	if rec.Header().Get("X-Tinker-Archive-Visibility") != "private" {
+		t.Fatalf("archive visibility = %q", rec.Header().Get("X-Tinker-Archive-Visibility"))
+	}
 
 	methodJSON(t, h, http.MethodDelete, base+"/publish", nil, http.StatusOK, &map[string]any{})
 	checkpoints = checkpointList(t, h)
