@@ -108,14 +108,18 @@ localtinker and record:
   sampling parameters
 
 Record each run as JSONL so shape comparisons can be reviewed without replaying
-the job. Each line should include:
+the job. Each line should include a stable comparison ID, a case ID shared by
+the hosted and local observations for the same SDK action, and an event payload:
 
 ```
-{"backend":"hosted|local","event":"capabilities|future|metrics|checkpoint|sampler","payload":{}}
+{"comparison_id":"YYYYMMDD-<short-commit>","case_id":"train-short","backend":"hosted|local","event":"meta|capabilities|future|metrics|checkpoint|sampler","payload":{}}
 ```
 
 Required events:
 
+- `meta`: local commit, SDK commit, model, runner machine, Python executable,
+  `TINKER_BASE_URL` class (`hosted` or `local`, not the secret URL), and
+  checkpoint root.
 - `capabilities`: supported model name, tokenizer ID, and advertised feature
   names.
 - `future`: operation name, request ID, future ID, terminal category, terminal
