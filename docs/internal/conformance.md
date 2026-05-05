@@ -156,10 +156,10 @@ limited public beta only if the caveats below are stated plainly.
 | Area | Status | Publicization decision |
 | --- | --- | --- |
 | SDK route surface | Meaningful local coverage exists for sessions, futures, training, checkpoints, sampler flows, malformed inputs, and REST listings. | Beta-ready with the covered surface named. |
-| Hosted comparison | `docs/internal/hosted-comparison/20260505-a995c00-hosted-local.jsonl` records hosted-vs-local checkpoint, optimizer-resume, metrics, and sampler shape evidence. `docs/internal/hosted-comparison/20260505-ecc480f-custom-loss-hosted-local.jsonl` records custom-loss shape evidence. | Covered for recorded shapes; numeric and authorization differences remain caveats. |
+| Hosted comparison | `docs/internal/hosted-comparison/20260505-a995c00-hosted-local.jsonl` records hosted-vs-local checkpoint, optimizer-resume, metrics, and sampler shape evidence. `docs/internal/hosted-comparison/20260505-ecc480f-custom-loss-hosted-local.jsonl` records custom-loss shape evidence. `docs/internal/hosted-comparison/20260505-497eb1c-ce-hosted-local.jsonl` records dense cross-entropy shape and loss evidence. | Covered for recorded shapes; numeric and authorization differences remain caveats. |
 | Checkpoint downloads | Local HTTP archive URLs and metadata are covered; hosted signed URL and authorization behavior are not matched. | Disclose for beta; blocker for hosted-compatible wording. |
 | Futures and queueing | Local queue, cancellation, panic containment, and unfinished-queue recovery are covered; hosted timing/backpressure is not compared. | Disclose for beta. |
-| Cross-entropy | Dense tensors, invalid weights, sparse tensor rejection, and logprobs are covered locally; hosted numeric parity is not recorded. | Disclose for beta. |
+| Cross-entropy | Dense tensors, invalid weights, sparse tensor rejection, and logprobs are covered locally. `docs/internal/hosted-comparison/20260505-497eb1c-ce-hosted-local.jsonl` records matching hosted/local per-token logprob shapes and a forward loss mean difference. | Beta-ready with numeric caveats. |
 | Custom losses | `docs/internal/hosted-comparison/20260505-ecc480f-custom-loss-hosted-local.jsonl` records hosted and local `forward_backward_custom` success and `custom_loss:mean` metric shape evidence. | Beta-ready with numeric caveats. |
 | Sampling | Generated logprobs, prompt logprobs, deterministic seed flow, string stops, and top-k prompt logprob shapes are covered locally and in hosted comparison rows. | Beta-ready with numeric/distribution caveats. |
 | Packaging | Clean-checkout `GOWORK=off go test ./...` must pass with the intended MLX module graph and native libraries. | Launch blocker until freshly proven. |
@@ -173,8 +173,8 @@ limited public beta only if the caveats below are stated plainly.
   download URLs.
 - Checkpoint ownership is recorded as `local`; hosted authorization behavior
   has not been compared.
-- Dense cross-entropy and per-token logprobs are local MLX behavior; hosted
-  numeric parity has not been recorded.
+- Dense cross-entropy per-token logprob shapes match the recorded hosted
+  comparison, but forward loss means differ.
 - Sparse `TensorData` inputs are rejected; only dense tensor inputs are
   supported.
 - Multimodal model input chunks (`image` and `image_asset_pointer`) are
