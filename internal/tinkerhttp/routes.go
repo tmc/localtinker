@@ -43,6 +43,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/optim_step", s.optimStep)
 	mux.HandleFunc("POST /api/v1/save_weights", s.saveWeights)
 	mux.HandleFunc("POST /api/v1/load_weights", s.loadWeights)
+	mux.HandleFunc("POST /api/v1/load_state_with_optimizer", s.loadStateWithOptimizer)
 	mux.HandleFunc("POST /api/v1/save_weights_for_sampler", s.saveWeightsForSampler)
 	mux.HandleFunc("POST /api/v1/create_sampling_session", s.createSamplingSession)
 	mux.HandleFunc("POST /api/v1/asample", s.asample)
@@ -384,9 +385,18 @@ func (s *Server) saveWeights(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) loadWeights(w http.ResponseWriter, r *http.Request) {
+	s.loadWeightsWithOptimizer(w, r, false)
+}
+
+func (s *Server) loadStateWithOptimizer(w http.ResponseWriter, r *http.Request) {
+	s.loadWeightsWithOptimizer(w, r, true)
+}
+
+func (s *Server) loadWeightsWithOptimizer(w http.ResponseWriter, r *http.Request, optimizer bool) {
 	var req struct {
-		ModelID string `json:"model_id"`
-		Path    string `json:"path"`
+		ModelID        string `json:"model_id"`
+		Path           string `json:"path"`
+		OptimizerState *bool  `json:"optimizer_state"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
@@ -396,7 +406,10 @@ func (s *Server) loadWeights(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "missing model_id or path")
 		return
 	}
-	future, err := s.coord.LoadWeights(r.Context(), req.ModelID, req.Path)
+	if req.OptimizerState != nil {
+		optimizer = *req.OptimizerState
+	}
+	future, err := s.coord.LoadWeightsWithOptimizer(r.Context(), req.ModelID, req.Path, optimizer)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "system_error", err.Error())
 		return
@@ -763,8 +776,12 @@ func (s *Server) checkpointAction(w http.ResponseWriter, r *http.Request, path s
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 			return true
 		}
+		expires := time.Now().UTC().Add(15 * time.Minute)
 		w.Header().Set("Location", "file://"+file)
-		w.Header().Set("Expires", time.Now().UTC().Add(15*time.Minute).Format(http.TimeFormat))
+		w.Header().Set("Expires", expires.Format(http.TimeFormat))
+		w.Header().Set("X-Tinker-Archive-Expires-At", expires.Format(time.RFC3339))
+		w.Header().Set("X-Tinker-Archive-Owner", "local")
+		w.Header().Set("X-Tinker-Archive-Visibility", "private")
 		w.WriteHeader(http.StatusFound)
 	case r.Method == http.MethodDelete && action == "":
 		if err := tinkertrain.DeleteCheckpoint(tinkerPath); err != nil {

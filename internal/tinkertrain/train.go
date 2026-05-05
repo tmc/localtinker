@@ -115,7 +115,7 @@ type trainModel interface {
 	forwardBackward(context.Context, ForwardBackwardInput, bool) (ForwardBackwardOutput, error)
 	optimStep(context.Context, AdamParams) (OptimStepOutput, error)
 	saveState(context.Context, string) (string, error)
-	loadState(context.Context, string) error
+	loadState(context.Context, string, bool) error
 	saveForSampler(context.Context, string) (string, error)
 	sample(context.Context, SampleRequest) (SampleOutput, error)
 }
@@ -191,11 +191,15 @@ func (m *Manager) SaveState(ctx context.Context, modelID, name string) (string, 
 }
 
 func (m *Manager) LoadState(ctx context.Context, modelID, path string) error {
+	return m.LoadStateWithOptimizer(ctx, modelID, path, false)
+}
+
+func (m *Manager) LoadStateWithOptimizer(ctx context.Context, modelID, path string, optimizer bool) error {
 	model, err := m.model(modelID)
 	if err != nil {
 		return err
 	}
-	return model.loadState(ctx, path)
+	return model.loadState(ctx, path, optimizer)
 }
 
 func (m *Manager) CreateSamplingSession(ctx context.Context, sessionID, modelPath, baseModel string) error {

@@ -597,16 +597,26 @@ func (c *Coordinator) SaveWeights(ctx context.Context, modelID, path string) (Fu
 }
 
 func (c *Coordinator) LoadWeights(ctx context.Context, modelID, path string) (Future, error) {
-	if err := c.train.LoadState(ctx, modelID, path); err != nil {
+	return c.LoadWeightsWithOptimizer(ctx, modelID, path, false)
+}
+
+func (c *Coordinator) LoadWeightsWithOptimizer(ctx context.Context, modelID, path string, optimizer bool) (Future, error) {
+	if err := c.train.LoadStateWithOptimizer(ctx, modelID, path, optimizer); err != nil {
 		return c.UserErrorFuture(ctx, err.Error())
 	}
+	typ := "load_weights"
+	if optimizer {
+		typ = "load_state_with_optimizer"
+	}
 	return c.CompleteFuture(ctx, map[string]any{
-		"type": "load_weights",
-		"path": path,
+		"type":            typ,
+		"path":            path,
+		"optimizer_state": optimizer,
 	}, map[string]any{
-		"type":     "load_weights",
-		"model_id": modelID,
-		"path":     path,
+		"type":            typ,
+		"model_id":        modelID,
+		"path":            path,
+		"optimizer_state": optimizer,
 	})
 }
 

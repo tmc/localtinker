@@ -707,6 +707,19 @@ func TestCheckpointActionsTrackMetadata(t *testing.T) {
 		t.Fatalf("ttl checkpoint = %#v", checkpoints[0])
 	}
 
+	req := httptest.NewRequest(http.MethodGet, base+"/archive", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("archive status = %d, want %d body = %s", rec.Code, http.StatusFound, rec.Body.String())
+	}
+	if rec.Header().Get("X-Tinker-Archive-Expires-At") == "" {
+		t.Fatalf("missing archive expiration metadata")
+	}
+	if rec.Header().Get("X-Tinker-Archive-Owner") != "local" {
+		t.Fatalf("archive owner = %q", rec.Header().Get("X-Tinker-Archive-Owner"))
+	}
+
 	methodJSON(t, h, http.MethodDelete, base+"/publish", nil, http.StatusOK, &map[string]any{})
 	checkpoints = checkpointList(t, h)
 	if checkpoints[0].Public {
