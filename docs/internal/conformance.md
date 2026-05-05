@@ -14,8 +14,9 @@ Tinker SDK when `TINKER_SDK_DIR` is available.
 | Futures | `sdk_handshake.txt` and `sdk_async_errors.txt` verify missing future errors, future id echoing, and user-error futures. | Covered |
 | Training | `sdk_smoke.txt` creates a LoRA training client, calls `get_info`, `forward`, `forward_backward`, and `optim_step`, and checks loss decreases. | Covered |
 | Metrics | `sdk_smoke.txt` checks `loss:mean` and that `optimizer_backend:mlx` is reported by an optimizer step. | Covered |
+| Cross-entropy | `internal/tinkertrain/crossentropy_test.go` covers dense target tensors, weighted dense loss, and returned per-token logprobs. | Covered locally |
 | Checkpoints | `sdk_smoke.txt` saves, loads, lists, archives, publishes, unpublishes, sets TTL, and deletes checkpoints. It also opens the generated archive and checks expected files. | Covered locally |
-| Sampler | `sdk_smoke.txt` saves sampler weights, creates a sampling client, and samples one token. | Covered locally |
+| Sampler | `sdk_smoke.txt` saves sampler weights, creates a sampling client, and samples one token. `internal/tinkertrain/sample_test.go` covers integer stops, tokenizer-backed string stops, generated token logprobs, and prompt logprobs. | Covered locally |
 | Malformed inputs | `sdk_malformed_inputs.txt` and `sdk_async_errors.txt` verify malformed training and async request errors. | Covered |
 
 Run the local suite with:
@@ -50,7 +51,7 @@ localtinker and record:
   URLs.
 - Checkpoint ownership is recorded as `local` and is not an authorization
   boundary.
-- Cross-entropy still uses the local MLX shifted-token path internally.
-- String stops, generated token logprobs, prompt logprobs, and top-k prompt
-  logprobs are not implemented.
+- Dense cross-entropy and per-token logprobs are local MLX behavior; hosted
+  numeric parity has not been recorded.
+- Top-k prompt logprobs are not implemented.
 - Hosted and local numeric results are not expected to match exactly.
