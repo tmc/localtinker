@@ -268,7 +268,17 @@ func (c *Coordinator) Capabilities(_ context.Context) ServerCapabilities {
 			ModelID:       "Qwen/Qwen3-8B",
 			ContextLength: 32768,
 			TokenizerID:   "Qwen/Qwen3-8B",
-			Supported:     []string{"handshake", "future", "cross_entropy", "adamw", "save_weights_for_sampler", "sample"},
+			Supported: []string{
+				"handshake",
+				"future",
+				"cross_entropy",
+				"adamw",
+				"save_weights_for_sampler",
+				"sample",
+				"sample_generated_logprobs",
+				"sample_prompt_logprobs",
+				"sample_string_stops",
+			},
 		}},
 	}
 }

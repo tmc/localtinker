@@ -2,6 +2,7 @@ package tinkercoord
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -34,6 +35,31 @@ func TestSessionHeartbeat(t *testing.T) {
 	}
 	if !session.LastSeenAt.Equal(now) {
 		t.Fatalf("LastSeenAt = %s, want %s", session.LastSeenAt, now)
+	}
+}
+
+func TestCapabilitiesAdvertiseSamplerConformance(t *testing.T) {
+	c, err := New(Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	caps := c.Capabilities(context.Background())
+	if len(caps.Models) != 1 {
+		t.Fatalf("models = %d, want 1", len(caps.Models))
+	}
+	supported := caps.Models[0].Supported
+	for _, feature := range []string{
+		"sample",
+		"sample_generated_logprobs",
+		"sample_prompt_logprobs",
+		"sample_string_stops",
+	} {
+		if !slices.Contains(supported, feature) {
+			t.Fatalf("supported = %v, missing %q", supported, feature)
+		}
+	}
+	if slices.Contains(supported, "top_k_prompt_logprobs") {
+		t.Fatalf("supported = %v, must not advertise top_k_prompt_logprobs", supported)
 	}
 }
 

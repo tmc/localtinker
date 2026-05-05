@@ -1,0 +1,65 @@
+python sdk_sampling.py
+stdout 'SDK_SAMPLING_OK'
+
+-- sdk_sampling.py --
+import os
+
+import httpx
+import tinker
+from tinker import ServiceClient
+
+
+client = ServiceClient()
+try:
+    training = client.create_lora_training_client(
+        base_model="Qwen/Qwen3-8B",
+        rank=8,
+    )
+    saved = training.save_weights_for_sampler("sdk-sampling").result(timeout=120)
+    sampler = training.create_sampling_client(saved.path)
+    sample = sampler.sample(
+        tinker.ModelInput.from_ints([1, 1, 1]),
+        1,
+        tinker.SamplingParams(max_tokens=1, temperature=0),
+    ).result(timeout=120)
+    assert len(sample.sequences) == 1, sample
+    seq = sample.sequences[0]
+    assert len(seq.tokens) == 1, sample
+    assert len(seq.logprobs) == len(seq.tokens), sample
+
+    with httpx.Client(base_url=os.environ["TINKER_BASE_URL"], timeout=120) as raw:
+        req = {
+            "model_path": saved.path,
+            "num_samples": 1,
+            "prompt": {"chunks": [{"type": "encoded_text", "tokens": [1, 1, 1]}]},
+            "sampling_params": {
+                "max_tokens": 1,
+                "temperature": 0,
+                "seed": 7,
+                "prompt_logprobs": True,
+            },
+        }
+        first = raw.post("/api/v1/asample", json=req)
+        first.raise_for_status()
+        first = raw.post(
+            "/api/v1/retrieve_future",
+            json={"future_id": first.json()["request_id"]},
+        )
+        first.raise_for_status()
+        first = first.json()
+
+        second = raw.post("/api/v1/asample", json=req)
+        second.raise_for_status()
+        second = raw.post(
+            "/api/v1/retrieve_future",
+            json={"future_id": second.json()["request_id"]},
+        )
+        second.raise_for_status()
+        second = second.json()
+
+    assert first["sequences"][0]["tokens"] == second["sequences"][0]["tokens"], (first, second)
+    assert len(first["sequences"][0]["logprobs"]) == len(first["sequences"][0]["tokens"]), first
+    assert len(first["prompt_logprobs"]) == 3, first
+    print("SDK_SAMPLING_OK", saved.path)
+finally:
+    client.holder.close()
