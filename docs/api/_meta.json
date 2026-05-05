@@ -1,0 +1,12 @@
+{
+  "title": "localtinker API",
+  "pages": [
+    "serviceclient",
+    "trainingclient",
+    "samplingclient",
+    "restclient",
+    "apifuture",
+    "types",
+    "exceptions"
+  ]
+}

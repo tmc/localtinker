@@ -165,8 +165,8 @@ returns generated-token logprobs and can return prompt logprobs. Unsupported
 hosted features return local user errors instead of silently falling back to the
 hosted service.
 
-See `docs/internal/conformance.md` for the current SDK coverage and hosted
-comparison checklist.
+See `docs/` for the local SDK reference and `docs/internal/conformance.md` for
+the current SDK coverage and hosted comparison checklist.
 
 ## Development
 
