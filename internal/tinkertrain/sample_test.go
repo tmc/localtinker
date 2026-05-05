@@ -77,9 +77,10 @@ func TestStopTokenSequencesStringRequiresTokenizer(t *testing.T) {
 func TestSampleOutputPromptLogprobsMarshalNull(t *testing.T) {
 	value := 1.25
 	out := SampleOutput{
-		Type:           "sample",
-		Sequences:      []SampledSequence{{StopReason: "length", Tokens: []int{1}, Logprobs: []float64{-0.5}}},
-		PromptLogprobs: []*float64{nil, &value},
+		Type:               "sample",
+		Sequences:          []SampledSequence{{StopReason: "length", Tokens: []int{1}, Logprobs: []float64{-0.5}}},
+		PromptLogprobs:     []*float64{nil, &value},
+		TopKPromptLogprobs: []any{nil, [][]any{{7, -0.25}, {3, -1.5}}},
 	}
 	data, err := json.Marshal(out)
 	if err != nil {
@@ -88,6 +89,18 @@ func TestSampleOutputPromptLogprobsMarshalNull(t *testing.T) {
 	const want = `"prompt_logprobs":[null,1.25]`
 	if !strings.Contains(string(data), want) {
 		t.Fatalf("json = %s, want %s", data, want)
+	}
+	const topK = `"topk_prompt_logprobs":[null,[[7,-0.25],[3,-1.5]]]`
+	if !strings.Contains(string(data), topK) {
+		t.Fatalf("json = %s, want %s", data, topK)
+	}
+}
+
+func TestTopKLogprobs(t *testing.T) {
+	got := topKLogprobs([]float64{-2, -0.5, -0.5, -4}, 3)
+	want := [][]any{{1, -0.5}, {2, -0.5}, {0, -2.0}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("topKLogprobs = %#v, want %#v", got, want)
 	}
 }
 
