@@ -17,6 +17,7 @@ try:
     )
     saved = training.save_weights_for_sampler("sdk-sampling").result(timeout=120)
     sampler = training.create_sampling_client(saved.path)
+    assert sampler.get_base_model() == "Qwen/Qwen3-8B"
     sample = sampler.sample(
         tinker.ModelInput.from_ints([1, 1, 1]),
         1,

@@ -125,6 +125,36 @@ func TestSessionRESTRoutes(t *testing.T) {
 	}
 }
 
+func TestSamplerRESTRoute(t *testing.T) {
+	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+
+	var sampler struct {
+		SamplerID string  `json:"sampler_id"`
+		BaseModel string  `json:"base_model"`
+		ModelPath *string `json:"model_path"`
+	}
+	getJSON(t, h, "/api/v1/samplers/sess-a:sample:0", &sampler)
+	if sampler.SamplerID != "sess-a:sample:0" {
+		t.Fatalf("sampler_id = %q, want sess-a:sample:0", sampler.SamplerID)
+	}
+	if sampler.BaseModel != "Qwen/Qwen3-8B" {
+		t.Fatalf("base_model = %q, want Qwen/Qwen3-8B", sampler.BaseModel)
+	}
+	if sampler.ModelPath != nil {
+		t.Fatalf("model_path = %q, want nil", *sampler.ModelPath)
+	}
+
+	var missing ErrorResponse
+	methodJSON(t, h, http.MethodGet, "/api/v1/samplers/", nil, http.StatusNotFound, &missing)
+	if missing.Code != "not_found" {
+		t.Fatalf("missing sampler response = %#v", missing)
+	}
+}
+
 func TestRequestBodyLimit(t *testing.T) {
 	c, err := tinkercoord.New(tinkercoord.Config{
 		Store:           tinkerdb.OpenMemory(),
