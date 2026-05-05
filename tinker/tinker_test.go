@@ -102,6 +102,16 @@ func TestCrossEntropyTensorDataValidation(t *testing.T) {
 			},
 		},
 		{
+			name: "omitted dtypes",
+			edit: func(in *LossInput) {
+				in.TargetTokensTensor.DType = ""
+				in.WeightsTensor = TensorData{
+					Data:  []float64{1, 0.5, 0, 1},
+					Shape: []int{2, 2},
+				}
+			},
+		},
+		{
 			name: "bad target shape",
 			edit: func(in *LossInput) {
 				in.TargetTokensTensor.Shape = []int{3}
@@ -119,6 +129,20 @@ func TestCrossEntropyTensorDataValidation(t *testing.T) {
 			name: "fractional target",
 			edit: func(in *LossInput) {
 				in.TargetTokensTensor.Data[1] = 2.5
+			},
+			want: "target tokens tensor contains invalid token",
+		},
+		{
+			name: "infinite target",
+			edit: func(in *LossInput) {
+				in.TargetTokensTensor.Data[1] = math.Inf(1)
+			},
+			want: "target tokens tensor contains invalid token",
+		},
+		{
+			name: "out of range target",
+			edit: func(in *LossInput) {
+				in.TargetTokensTensor.Data[1] = float64(math.MaxInt32) + 1
 			},
 			want: "target tokens tensor contains invalid token",
 		},
@@ -223,6 +247,40 @@ func TestCrossEntropyTensorDataValidation(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("validateBatch() = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestCrossEntropyTensorShapeTable(t *testing.T) {
+	tests := []struct {
+		name  string
+		shape []int
+	}{
+		{name: "flat", shape: []int{4}},
+		{name: "rectangular", shape: []int{2, 2}},
+		{name: "row", shape: []int{1, 4}},
+		{name: "column", shape: []int{4, 1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			batch := []Datum{{
+				Input: FromTokens([]int{10, 11, 12, 13}),
+				LossInput: LossInput{
+					TargetTokensTensor: TensorData{
+						Data:  []float64{1, 2, 3, 4},
+						DType: "int64",
+						Shape: tt.shape,
+					},
+					WeightsTensor: TensorData{
+						Data:  []float64{1, 0, 0.5, 2},
+						DType: "float32",
+						Shape: tt.shape,
+					},
+				},
+			}}
+			if err := validateBatch(batch, CrossEntropy{}); err != nil {
+				t.Fatalf("validateBatch() = %v, want nil", err)
 			}
 		})
 	}
