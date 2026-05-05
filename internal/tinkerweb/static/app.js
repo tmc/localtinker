@@ -7,6 +7,7 @@ function App() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [updatedAt, setUpdatedAt] = useState(null);
+  const [path, setPath] = useState(window.location.pathname);
 
   async function load() {
     try {
@@ -26,20 +27,48 @@ function App() {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  function navigate(next) {
+    window.history.pushState(null, '', next);
+    setPath(next);
+  }
+
   const totals = useMemo(() => summarize(data), [data]);
+  const docsPage = docsRoute(path);
   return h('main', { class: 'shell' },
     h('header', { class: 'topbar' },
       h('div', null,
         h('h1', null, 'localtinker'),
-        h('p', null, 'Coordinator and node mesh status')
+        h('p', null, docsPage ? 'Local Tinker-compatible SDK documentation' : 'Coordinator and node mesh status')
       ),
-      h('div', { class: 'statusline' },
-        h('span', { class: error ? 'dot bad' : 'dot good' }),
-        h('span', null, error || 'connected'),
-        h('button', { onClick: load }, 'Refresh')
+      h('div', { class: 'topactions' },
+        h('nav', { class: 'nav' },
+          navButton('Dashboard', '/', path, navigate),
+          navButton('Docs', '/docs', path, navigate),
+          navButton('Quickstart', '/quickstart', path, navigate),
+          navButton('SDK API', '/api', path, navigate)
+        ),
+        h('div', { class: 'statusline' },
+          h('span', { class: error ? 'dot bad' : 'dot good' }),
+          h('span', null, error || 'connected'),
+          h('button', { onClick: load }, 'Refresh')
+        )
       )
     ),
-    h('section', { class: 'metrics' },
+    docsPage
+      ? h(Docs, { page: docsPage, data })
+      : h(DashboardPage, { data, error, updatedAt, totals })
+  );
+}
+
+function DashboardPage({ data, error, updatedAt, totals }) {
+  return [
+    h('section', { class: 'metrics', key: 'metrics' },
       metric('Nodes', totals.nodes),
       metric('Active leases', totals.activeLeases),
       metric('Queued', totals.queued),
@@ -50,9 +79,192 @@ function App() {
       metric('Last loss', totals.lastLoss),
       metric('Optimizer step', totals.optimizerStep)
     ),
-    error ? h('section', { class: 'notice' }, error) : null,
-    data ? h(Dashboard, { data, updatedAt }) : h('section', { class: 'empty' }, 'Loading dashboard...')
+    error ? h('section', { class: 'notice', key: 'error' }, error) : null,
+    data ? h(Dashboard, { data, updatedAt, key: 'dashboard' }) : h('section', { class: 'empty', key: 'loading' }, 'Loading dashboard...')
+  ];
+}
+
+function navButton(label, href, path, navigate) {
+  const current = href === '/' ? !docsRoute(path) : path === href;
+  return h('button', {
+    class: current ? 'active' : '',
+    onClick: () => navigate(href)
+  }, label);
+}
+
+function docsRoute(path) {
+  switch (path) {
+    case '/docs':
+      return 'overview';
+    case '/quickstart':
+      return 'quickstart';
+    case '/api':
+      return 'api';
+    default:
+      return '';
+  }
+}
+
+function Docs({ page, data }) {
+  const coord = (data && data.coordinator) || {};
+  const caps = coord.capabilities || {};
+  const models = caps.models || [];
+  return h('div', { class: 'docs' },
+    h('aside', { class: 'docnav' },
+      h('a', { href: '/docs' }, 'Overview'),
+      h('a', { href: '/quickstart' }, 'Quickstart'),
+      h('a', { href: '/api' }, 'SDK API'),
+      h('a', { href: '/runs' }, 'Dashboard')
+    ),
+    h('article', { class: 'docbody' },
+      page === 'quickstart' ? h(QuickstartDocs) :
+      page === 'api' ? h(APIDocs, { models }) :
+      h(OverviewDocs, { caps, models })
+    )
   );
+}
+
+function OverviewDocs({ caps, models }) {
+  return [
+    docTitle('localtinker docs', 'Run the Tinker Python SDK against a local MLX-backed coordinator.'),
+    h('section', { class: 'docsection' },
+      h('h2', null, 'What it serves'),
+      h('p', null, 'localtinker implements the hosted Tinker HTTP SDK surface for local training, checkpointing, sampling, and run inspection. It is intended for offline development and reproducible local experiments, not hosted authorization or fleet scheduling.'),
+      h('div', { class: 'cardgrid' },
+        featureCard('SDK endpoint', 'Point TINKER_BASE_URL at this server and use ServiceClient, TrainingClient, SamplingClient, and RestClient from the upstream SDK.'),
+        featureCard('Local MLX backend', 'LoRA training, dense cross entropy, optimizer state, checkpoints, and sampler sessions execute through the local MLX adapter.'),
+        featureCard('Operator dashboard', 'The dashboard shows nodes, queue state, futures, runs, checkpoints, artifacts, recent failures, and live training metrics.')
+      )
+    ),
+    h('section', { class: 'docsection' },
+      h('h2', null, 'Capabilities'),
+      h('div', { class: 'capgrid' },
+        capability('Training', true),
+        capability('Sampling', true),
+        capability('Prompt logprobs', true),
+        capability('Top-k prompt logprobs', true),
+        capability('String stops', true),
+        capability('Hosted auth parity', false)
+      ),
+      h('p', null, `Models advertised by this coordinator: ${models.length ? models.map(m => m.model_id).join(', ') : 'not loaded yet'}.`)
+    ),
+    h('section', { class: 'docsection' },
+      h('h2', null, 'Known limits'),
+      h('ul', { class: 'checklist' },
+        h('li', null, 'Checkpoint archive URLs are local HTTP download URLs. Hosted signed URL authorization is not reproduced.'),
+        h('li', null, 'Hosted numeric parity varies because execution is local MLX, local tokenizer, and local model-cache dependent.'),
+        h('li', null, 'Multimodal chunks and sparse TensorData are rejected with local user errors.'),
+        h('li', null, 'Hosted queue cancellation semantics are approximated locally; check futures for final state.')
+      )
+    )
+  ];
+}
+
+function QuickstartDocs() {
+  return [
+    docTitle('Quickstart', 'Start the coordinator, point the upstream SDK at it, then run a short local job.'),
+    h('section', { class: 'docsection' },
+      h('h2', null, 'Build and serve'),
+      codeBlock(`go build -o /tmp/localtinker ./cmd/localtinker
+/tmp/localtinker serve \\
+  -addr 127.0.0.1:8080 \\
+  -home /tmp/localtinker-home`)
+    ),
+    h('section', { class: 'docsection' },
+      h('h2', null, 'Configure the SDK'),
+      codeBlock(`export TINKER_SDK_DIR=$HOME/go/src/github.com/thinking-machines-lab/tinker
+export PYTHONPATH=$TINKER_SDK_DIR/src
+export TINKER_BASE_URL=http://127.0.0.1:8080
+export TINKER_API_KEY=tml-local-test
+export LOCALTINKER_SDK_PYTHON=$TINKER_SDK_DIR/.venv/bin/python`)
+    ),
+    h('section', { class: 'docsection' },
+      h('h2', null, 'Run a training smoke'),
+      codeBlock(`${'${LOCALTINKER_SDK_PYTHON:-$TINKER_SDK_DIR/.venv/bin/python}'} \\
+  ./cmd/localtinker/examples/tinker_job.py --preset short`)
+    ),
+    h('section', { class: 'docsection' },
+      h('h2', null, 'Useful pages'),
+      h('table', { class: 'doctable' },
+        h('tbody', null,
+          docRow('/', 'Live coordinator overview'),
+          docRow('/runs', 'Run summaries and recent activity'),
+          docRow('/checkpoints', 'Checkpoint paths and archive state'),
+          docRow('/nodes', 'Node health, load, and artifact peer labels'),
+          docRow('/artifacts', 'Published artifact aliases and root hashes')
+        )
+      )
+    )
+  ];
+}
+
+function APIDocs({ models }) {
+  return [
+    docTitle('SDK API', 'The upstream Python SDK surface that localtinker serves locally.'),
+    h('section', { class: 'docsection' },
+      h('h2', null, 'ServiceClient'),
+      h('p', null, 'Create a client normally after setting TINKER_BASE_URL. Server capabilities, LoRA training clients, sampling clients, REST clients, and resume-from-state flows are served locally.'),
+      codeBlock(`from tinker import ServiceClient
+
+client = ServiceClient()
+training = client.create_lora_training_client(
+    base_model="Qwen/Qwen3-8B",
+    rank=8,
+)
+print(training.get_info().model_id)`)
+    ),
+    h('section', { class: 'docsection' },
+      h('h2', null, 'TrainingClient'),
+      h('p', null, 'Supported training operations include forward, forward_backward, custom logprob loss, optim_step, save_weights, save_weights_and_get_sampling_client, load_state, and load_state_with_optimizer.'),
+      h('table', { class: 'doctable' },
+        h('tbody', null,
+          docRow('forward', 'Compute loss without gradients.'),
+          docRow('forward_backward', 'Compute loss and gradients for cross_entropy or custom logprob loss.'),
+          docRow('optim_step', 'Apply Adam optimizer updates and record optimizer state.'),
+          docRow('save_weights_and_get_sampling_client', 'Write a local tinker:// checkpoint and create a sampler session.')
+        )
+      )
+    ),
+    h('section', { class: 'docsection' },
+      h('h2', null, 'SamplingClient'),
+      h('p', null, 'Sampling supports max_tokens, temperature, top_k, top_p, seeds, token stop sequences, string stop sequences, generated-token logprobs, prompt logprobs, and top-k prompt logprobs.'),
+      codeBlock(`params = tinker.SamplingParams(
+    max_tokens=32,
+    temperature=0.7,
+    stop=["\\n\\n"],
+)
+future = sampling.sample(prompt, num_samples=1, sampling_params=params)
+sample = future.result().samples[0]`)
+    ),
+    h('section', { class: 'docsection' },
+      h('h2', null, 'REST routes'),
+      h('p', null, 'RestClient-compatible routes cover sessions, training runs, checkpoints, archive URLs, publish/unpublish, TTL updates, deletes, and future lookup.'),
+      h('p', null, `Current model set: ${models.length ? models.map(m => m.model_id).join(', ') : 'no advertised models in the live snapshot'}.`)
+    )
+  ];
+}
+
+function docTitle(title, text) {
+  return h('header', { class: 'doctitle' }, h('h1', null, title), h('p', null, text));
+}
+
+function featureCard(title, text) {
+  return h('section', { class: 'feature' }, h('h3', null, title), h('p', null, text));
+}
+
+function capability(label, ok) {
+  return h('section', { class: `cap ${ok ? 'yes' : 'no'}` },
+    h('span', null, ok ? 'Yes' : 'No'),
+    h('strong', null, label)
+  );
+}
+
+function codeBlock(text) {
+  return h('pre', null, h('code', null, text));
+}
+
+function docRow(left, right) {
+  return h('tr', { key: left }, h('td', null, h('code', null, left)), h('td', null, right));
 }
 
 function Dashboard({ data, updatedAt }) {

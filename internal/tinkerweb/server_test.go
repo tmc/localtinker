@@ -52,7 +52,7 @@ func TestDashboardRoutes(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "preact") {
 		t.Fatalf("index does not reference preact:\n%s", rec.Body.String())
 	}
-	for _, path := range []string{"/runs", "/checkpoints", "/nodes", "/artifacts"} {
+	for _, path := range []string{"/docs", "/quickstart", "/api", "/runs", "/checkpoints", "/nodes", "/artifacts"} {
 		rec = httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
 		if rec.Code != http.StatusOK {
@@ -68,7 +68,7 @@ func TestDashboardRoutes(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /app.js status = %d", rec.Code)
 	}
-	for _, want := range []string{"Queue", "Recent Failures", "ArtifactsTable"} {
+	for _, want := range []string{"Queue", "Recent Failures", "ArtifactsTable", "ServiceClient", "SDK API"} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("app.js missing %q", want)
 		}
