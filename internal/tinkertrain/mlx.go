@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
 	lmtrain "github.com/tmc/mlx-go-lm/lmtrain"
+	"github.com/tmc/mlx-go-lm/mlxlm"
 	"github.com/tmc/mlx-go-lm/mlxlm/llm/models"
 	"github.com/tmc/mlx-go-lm/mlxlm/llm/sample"
 	"github.com/tmc/mlx-go-lm/mlxlm/llm/training"
@@ -50,16 +52,17 @@ type optimizerState struct {
 }
 
 type mlxModel struct {
-	mu       sync.Mutex
-	id       string
-	base     string
-	bundle   *lmtrain.ModelBundle
-	adapters *tuner.Set
-	rank     int
-	step     int
-	pending  denseBatch
-	lastLoss float64
-	lastAdam AdamParams
+	mu        sync.Mutex
+	id        string
+	base      string
+	bundle    *lmtrain.ModelBundle
+	tokenizer mlxlm.Tokenizer
+	adapters  *tuner.Set
+	rank      int
+	step      int
+	pending   denseBatch
+	lastLoss  float64
+	lastAdam  AdamParams
 }
 
 func newMLXModel(ctx context.Context, modelID string, cfg CreateConfig) (*mlxModel, error) {
@@ -100,12 +103,21 @@ func newMLXModel(ctx context.Context, modelID string, cfg CreateConfig) (*mlxMod
 	}
 
 	return &mlxModel{
-		id:       modelID,
-		base:     apiBase,
-		bundle:   bundle,
-		adapters: adapters,
-		rank:     rank,
+		id:        modelID,
+		base:      apiBase,
+		bundle:    bundle,
+		tokenizer: loadModelTokenizer(bundle.Path),
+		adapters:  adapters,
+		rank:      rank,
 	}, nil
+}
+
+func loadModelTokenizer(path string) mlxlm.Tokenizer {
+	tok, err := mlxlm.LoadTokenizer(path)
+	if err != nil {
+		return nil
+	}
+	return tok
 }
 
 func resolveMLXBase(base string) string {
@@ -273,7 +285,10 @@ func (m *mlxModel) sample(ctx context.Context, req SampleRequest) (SampleOutput,
 	if len(prompt) == 0 {
 		return SampleOutput{}, fmt.Errorf("sample: empty prompt")
 	}
-	stop := stopTokenSequences(req.SamplingParams.Stop)
+	stop, err := stopTokenSequences(req.SamplingParams.Stop, m.tokenizer)
+	if err != nil {
+		return SampleOutput{}, fmt.Errorf("sample stop: %w", err)
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -282,9 +297,17 @@ func (m *mlxModel) sample(ctx context.Context, req SampleRequest) (SampleOutput,
 		Type:      "sample",
 		Sequences: make([]SampledSequence, 0, numSamples),
 	}
+	if req.SamplingParams.PromptLogprobs {
+		logprobs, err := m.tokenLogprobs(ctx, prompt)
+		if err != nil {
+			return SampleOutput{}, fmt.Errorf("prompt logprobs: %w", err)
+		}
+		out.PromptLogprobs = logprobs
+	}
 	for range numSamples {
 		seq := append([]int(nil), prompt...)
 		gen := make([]int, 0, maxTokens)
+		logprobs := make([]float64, 0, maxTokens)
 		stopReason := "length"
 		var key *mlx.Array
 		if req.SamplingParams.Seed != 0 {
@@ -299,7 +322,7 @@ func (m *mlxModel) sample(ctx context.Context, req SampleRequest) (SampleOutput,
 				stepKey = left
 				key = right
 			}
-			next, err := m.nextToken(ctx, seq, req.SamplingParams, stepKey)
+			next, logprob, err := m.nextToken(ctx, seq, req.SamplingParams, stepKey)
 			if stepKey != nil {
 				stepKey.Free()
 			}
@@ -308,6 +331,7 @@ func (m *mlxModel) sample(ctx context.Context, req SampleRequest) (SampleOutput,
 			}
 			seq = append(seq, next)
 			gen = append(gen, next)
+			logprobs = append(logprobs, logprob)
 			if matchesStop(gen, stop) {
 				stopReason = "stop"
 				break
@@ -316,28 +340,54 @@ func (m *mlxModel) sample(ctx context.Context, req SampleRequest) (SampleOutput,
 		out.Sequences = append(out.Sequences, SampledSequence{
 			StopReason: stopReason,
 			Tokens:     gen,
+			Logprobs:   logprobs,
 		})
 	}
 	return out, nil
 }
 
-func (m *mlxModel) nextToken(ctx context.Context, tokens []int, params SamplingParams, key *mlx.Array) (int, error) {
+func (m *mlxModel) nextToken(ctx context.Context, tokens []int, params SamplingParams, key *mlx.Array) (int, float64, error) {
+	logits, err := m.logits(ctx, tokens)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer logits.Free()
+	shape := logits.Shape()
+	logprobs, err := lastLogprobs(logits)
+	if err != nil {
+		return 0, 0, err
+	}
+	token, err := sampleToken(ctx, logits, params, key)
+	if err != nil {
+		return 0, 0, err
+	}
+	if token < 0 || token >= shape[2] {
+		return 0, 0, fmt.Errorf("sample token %d outside vocab %d", token, shape[2])
+	}
+	return token, logprobs[token], nil
+}
+
+func (m *mlxModel) logits(ctx context.Context, tokens []int) (*mlx.Array, error) {
 	xs := make([]int32, len(tokens))
 	for i, token := range tokens {
 		xs[i] = int32(token)
 	}
 	input, err := mlx.FromSlice(xs, []int{1, len(xs)}, mlx.Int32)
 	if err != nil {
-		return 0, fmt.Errorf("sample input: %w", err)
+		return nil, fmt.Errorf("sample input: %w", err)
 	}
 	defer input.Free()
 
 	logits, _ := m.bundle.Model.Forward(ctx, input, nil)
-	defer logits.Free()
 	shape := logits.Shape()
 	if len(shape) != 3 || shape[1] == 0 || shape[2] == 0 {
-		return 0, fmt.Errorf("sample logits shape %v", shape)
+		logits.Free()
+		return nil, fmt.Errorf("sample logits shape %v", shape)
 	}
+	return logits, nil
+}
+
+func sampleToken(ctx context.Context, logits *mlx.Array, params SamplingParams, key *mlx.Array) (int, error) {
 	temp := params.Temperature
 	if temp == nil {
 		one := 1.0
@@ -359,6 +409,66 @@ func (m *mlxModel) nextToken(ctx context.Context, tokens []int, params SamplingP
 		return 0, fmt.Errorf("sample token: %w", err)
 	}
 	return v, nil
+}
+
+func (m *mlxModel) tokenLogprobs(ctx context.Context, tokens []int) ([]float64, error) {
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+	out := make([]float64, len(tokens))
+	out[0] = 0
+	for i := 1; i < len(tokens); i++ {
+		logits, err := m.logits(ctx, tokens[:i])
+		if err != nil {
+			return nil, err
+		}
+		logprobs, err := lastLogprobs(logits)
+		logits.Free()
+		if err != nil {
+			return nil, err
+		}
+		token := tokens[i]
+		if token < 0 || token >= len(logprobs) {
+			return nil, fmt.Errorf("token %d outside vocab %d", token, len(logprobs))
+		}
+		out[i] = logprobs[token]
+	}
+	return out, nil
+}
+
+func lastLogprobs(logits *mlx.Array) ([]float64, error) {
+	shape := logits.Shape()
+	if len(shape) != 3 || shape[0] != 1 || shape[1] == 0 || shape[2] == 0 {
+		return nil, fmt.Errorf("sample logits shape %v", shape)
+	}
+	logits32 := mlx.Astype(logits, mlx.Float32)
+	defer logits32.Free()
+	if err := mlx.Eval(logits32); err != nil {
+		return nil, fmt.Errorf("sample logits: %w", err)
+	}
+	values, err := mlx.ToSlice[float32](logits32)
+	if err != nil {
+		return nil, fmt.Errorf("sample logits: %w", err)
+	}
+	vocab := shape[2]
+	start := (shape[1] - 1) * vocab
+	last := values[start : start+vocab]
+	max := float64(last[0])
+	for _, v := range last[1:] {
+		if f := float64(v); f > max {
+			max = f
+		}
+	}
+	var sum float64
+	for _, v := range last {
+		sum += math.Exp(float64(v) - max)
+	}
+	norm := max + math.Log(sum)
+	out := make([]float64, len(last))
+	for i, v := range last {
+		out[i] = float64(v) - norm
+	}
+	return out, nil
 }
 
 func (m *mlxModel) Forward(ctx context.Context, input *mlx.Array, cache interface{}) (*mlx.Array, interface{}, error) {
@@ -763,8 +873,7 @@ func writeJSONFile(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	data = append(data, '
-')
+	data = append(data, '\n')
 	return os.WriteFile(path, data, 0644)
 }
 
@@ -865,26 +974,68 @@ func promptOffsetFromWeights(weights []float64) (int, error) {
 	return offset + 1, nil
 }
 
-func stopTokenSequences(v any) [][]int {
+func stopTokenSequences(v any, tok mlxlm.Tokenizer) ([][]int, error) {
 	if v == nil {
-		return nil
+		return nil, nil
 	}
 	if token, ok := scalarStopToken(v); ok {
-		return [][]int{{token}}
+		return [][]int{{token}}, nil
+	}
+	if s, ok := v.(string); ok {
+		return tokenizeStopStrings(tok, []string{s})
+	}
+	if stops, ok := v.([]string); ok {
+		return tokenizeStopStrings(tok, stops)
 	}
 	data, err := json.Marshal(v)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var one []int
 	if err := json.Unmarshal(data, &one); err == nil && len(one) > 0 {
-		return [][]int{one}
+		return [][]int{one}, nil
 	}
 	var many [][]int
 	if err := json.Unmarshal(data, &many); err == nil {
-		return many
+		return many, nil
 	}
-	return nil
+	var oneString string
+	if err := json.Unmarshal(data, &oneString); err == nil {
+		return tokenizeStopStrings(tok, []string{oneString})
+	}
+	var manyStrings []string
+	if err := json.Unmarshal(data, &manyStrings); err == nil {
+		return tokenizeStopStrings(tok, manyStrings)
+	}
+	return nil, nil
+}
+
+func tokenizeStopStrings(tok mlxlm.Tokenizer, stops []string) ([][]int, error) {
+	if tok == nil {
+		return nil, fmt.Errorf("tokenizer unavailable")
+	}
+	out := make([][]int, 0, len(stops))
+	for i, stop := range stops {
+		if stop == "" {
+			return nil, fmt.Errorf("stop string %d is empty", i)
+		}
+		tokens, err := tok.Encode(stop)
+		if err != nil {
+			return nil, fmt.Errorf("tokenize stop string %d: %w", i, err)
+		}
+		if len(tokens) == 0 {
+			return nil, fmt.Errorf("stop string %d tokenized to empty sequence", i)
+		}
+		seq := make([]int, len(tokens))
+		for j, token := range tokens {
+			if token < 0 {
+				return nil, fmt.Errorf("stop string %d tokenized to negative token %d", i, token)
+			}
+			seq[j] = int(token)
+		}
+		out = append(out, seq)
+	}
+	return out, nil
 }
 
 func scalarStopToken(v any) (int, bool) {

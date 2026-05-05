@@ -91,12 +91,13 @@ type SampleRequest struct {
 }
 
 type SamplingParams struct {
-	MaxTokens   int      `json:"max_tokens,omitempty"`
-	Seed        int      `json:"seed,omitempty"`
-	Stop        any      `json:"stop,omitempty"`
-	Temperature *float64 `json:"temperature,omitempty"`
-	TopK        int      `json:"top_k,omitempty"`
-	TopP        *float64 `json:"top_p,omitempty"`
+	MaxTokens      int      `json:"max_tokens,omitempty"`
+	Seed           int      `json:"seed,omitempty"`
+	Stop           any      `json:"stop,omitempty"`
+	Temperature    *float64 `json:"temperature,omitempty"`
+	TopK           int      `json:"top_k,omitempty"`
+	TopP           *float64 `json:"top_p,omitempty"`
+	PromptLogprobs bool     `json:"prompt_logprobs,omitempty"`
 }
 
 type SampleOutput struct {
