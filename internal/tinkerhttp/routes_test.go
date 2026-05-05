@@ -703,6 +703,24 @@ func TestConformanceMalformedAsyncRequestsReturnBadRequest(t *testing.T) {
 		t.Fatalf("optim_step response = %#v", errResp)
 	}
 
+	postJSONStatus(t, h, "/api/v1/load_state_with_optimizer",
+		map[string]any{"path": "tinker://model-a/weights/ckpt"},
+		http.StatusBadRequest,
+		&errResp,
+	)
+	if errResp.Code != "bad_request" || errResp.Message != "missing model_id or path" {
+		t.Fatalf("load_state_with_optimizer response = %#v", errResp)
+	}
+
+	postJSONStatus(t, h, "/api/v1/load_state_with_optimizer",
+		map[string]any{"model_id": "model-a"},
+		http.StatusBadRequest,
+		&errResp,
+	)
+	if errResp.Code != "bad_request" || errResp.Message != "missing model_id or path" {
+		t.Fatalf("load_state_with_optimizer missing path response = %#v", errResp)
+	}
+
 	tests := []struct {
 		name string
 		req  map[string]any
