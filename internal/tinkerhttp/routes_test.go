@@ -445,6 +445,22 @@ func TestTrainingInputValidationReturnsUserErrors(t *testing.T) {
 			want: "weights shape [4] does not match target_tokens shape [2 2]",
 		},
 		{
+			name: "broadcast-looking weights shape rejected",
+			edit: func(d map[string]any) {
+				d["loss_fn_inputs"].(map[string]any)["target_tokens"] = map[string]any{
+					"data":  []int{2, 2, 2, 2},
+					"dtype": "int64",
+					"shape": []int{2, 2},
+				}
+				d["loss_fn_inputs"].(map[string]any)["weights"] = map[string]any{
+					"data":  []float64{1, 1, 1, 1},
+					"dtype": "float32",
+					"shape": []int{1, 4},
+				}
+			},
+			want: "weights shape [1 4] does not match target_tokens shape [2 2]",
+		},
+		{
 			name: "bad shape",
 			edit: func(d map[string]any) {
 				d["loss_fn_inputs"].(map[string]any)["target_tokens"] = map[string]any{
@@ -454,6 +470,47 @@ func TestTrainingInputValidationReturnsUserErrors(t *testing.T) {
 				}
 			},
 			want: "shape [3] has 3 elements but data has 4",
+		},
+		{
+			name: "negative shape",
+			edit: func(d map[string]any) {
+				d["loss_fn_inputs"].(map[string]any)["target_tokens"] = map[string]any{
+					"data":  []int{2, 2, 2, 2},
+					"dtype": "int64",
+					"shape": []int{2, -2},
+				}
+			},
+			want: "negative shape dimension -2",
+		},
+		{
+			name: "out of range target",
+			edit: func(d map[string]any) {
+				d["loss_fn_inputs"].(map[string]any)["target_tokens"] = map[string]any{
+					"data":  []float64{1, 1, float64(1 << 31), 1},
+					"dtype": "int64",
+				}
+			},
+			want: "is out of range",
+		},
+		{
+			name: "fractional target",
+			edit: func(d map[string]any) {
+				d["loss_fn_inputs"].(map[string]any)["target_tokens"] = map[string]any{
+					"data":  []float64{1, 1.5, 1, 1},
+					"dtype": "int64",
+				}
+			},
+			want: "is not an integer",
+		},
+		{
+			name: "negative weight",
+			edit: func(d map[string]any) {
+				d["loss_fn_inputs"].(map[string]any)["weights"] = map[string]any{
+					"data":  []float64{1, -1, 1, 1},
+					"dtype": "float32",
+				}
+			},
+			want: "is not a non-negative finite number",
 		},
 	}
 	for _, tt := range tests {
@@ -538,6 +595,68 @@ func TestTrainingInputValidationAcceptsDenseCrossEntropy(t *testing.T) {
 	weight := input.Data[0].LossFnInputs["weights"]
 	if weight.DType != "float32" || !sameShape(weight.Shape, []int{2, 2}) {
 		t.Fatalf("weight tensor = %#v", weight)
+	}
+}
+
+func TestTrainingInputValidationNormalizesTensorData(t *testing.T) {
+	tests := []struct {
+		name      string
+		target    map[string]any
+		weight    map[string]any
+		wantShape []int
+	}{
+		{
+			name:      "flat omitted dtype and shape",
+			target:    map[string]any{"data": []int{4, 3, 2, 1}},
+			weight:    map[string]any{"data": []float64{1, 0.5, 0, 1}},
+			wantShape: []int{4},
+		},
+		{
+			name: "rectangular omitted dtype",
+			target: map[string]any{
+				"data":  []int{4, 3, 2, 1},
+				"shape": []int{2, 2},
+			},
+			weight: map[string]any{
+				"data":  []float64{1, 0.5, 0, 1},
+				"shape": []int{2, 2},
+			},
+			wantShape: []int{2, 2},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := tinkertrain.ForwardBackwardInput{
+				LossFn: "cross_entropy",
+				Data: []tinkertrain.Datum{
+					decodeDatum(t, map[string]any{
+						"model_input": map[string]any{
+							"chunks": []any{
+								map[string]any{
+									"type":   "encoded_text",
+									"tokens": []int{10, 11, 12, 13},
+								},
+							},
+						},
+						"loss_fn_inputs": map[string]any{
+							"target_tokens": tt.target,
+							"weights":       tt.weight,
+						},
+					}),
+				},
+			}
+			if err := normalizeAndValidateInput(&input); err != nil {
+				t.Fatal(err)
+			}
+			target := input.Data[0].LossFnInputs["target_tokens"]
+			if target.DType != "int64" || !sameShape(target.Shape, tt.wantShape) {
+				t.Fatalf("target tensor = %#v, want dtype int64 shape %v", target, tt.wantShape)
+			}
+			weight := input.Data[0].LossFnInputs["weights"]
+			if weight.DType != "float32" || !sameShape(weight.Shape, tt.wantShape) {
+				t.Fatalf("weight tensor = %#v, want dtype float32 shape %v", weight, tt.wantShape)
+			}
+		})
 	}
 }
 
@@ -638,6 +757,32 @@ func TestConformanceMalformedTrainingInputsReturnUserErrors(t *testing.T) {
 				}
 			},
 			want: "input tokens length 4 does not match target_tokens length 3",
+		},
+		{
+			name: "invalid target category",
+			edit: func(d map[string]any) {
+				d["loss_fn_inputs"].(map[string]any)["target_tokens"] = map[string]any{
+					"data":  []float64{1, 1, float64(1 << 31), 1},
+					"dtype": "int64",
+				}
+			},
+			want: "is out of range",
+		},
+		{
+			name: "weight broadcast category",
+			edit: func(d map[string]any) {
+				d["loss_fn_inputs"].(map[string]any)["target_tokens"] = map[string]any{
+					"data":  []int{1, 1, 1, 1},
+					"dtype": "int64",
+					"shape": []int{2, 2},
+				}
+				d["loss_fn_inputs"].(map[string]any)["weights"] = map[string]any{
+					"data":  []float64{1, 1, 1, 1},
+					"dtype": "float32",
+					"shape": []int{1, 4},
+				}
+			},
+			want: "weights shape [1 4] does not match target_tokens shape [2 2]",
 		},
 	}
 	for _, tt := range tests {
