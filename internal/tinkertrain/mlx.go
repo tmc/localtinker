@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -203,6 +204,9 @@ func (m *mlxModel) saveAdapter(name, kind string, optimizer bool) (string, error
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", fmt.Errorf("create adapter dir: %w", err)
 	}
+	if err := m.materializeAdapterWeights(); err != nil {
+		return "", err
+	}
 	if err := m.adapters.Save(filepath.Join(dir, "adapters.safetensors")); err != nil {
 		return "", fmt.Errorf("save adapter weights: %w", err)
 	}
@@ -248,6 +252,18 @@ func (m *mlxModel) saveAdapter(name, kind string, optimizer bool) (string, error
 		return "", fmt.Errorf("write completion marker: %w", err)
 	}
 	return "tinker://" + m.id + "/" + kind + "/" + cleanName(name), nil
+}
+
+func (m *mlxModel) materializeAdapterWeights() error {
+	params := m.adapters.Trainable()
+	if len(params) == 0 {
+		return fmt.Errorf("adapter weights: no trainable parameters")
+	}
+	if err := mlx.Eval(params...); err != nil {
+		return fmt.Errorf("eval adapter weights: %w", err)
+	}
+	runtime.KeepAlive(params)
+	return nil
 }
 
 func (m *mlxModel) loadState(_ context.Context, path string, optimizer bool) error {
