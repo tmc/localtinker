@@ -125,6 +125,40 @@ func TestSessionRESTRoutes(t *testing.T) {
 	}
 }
 
+func TestGetTrainingRunByTinkerPath(t *testing.T) {
+	store := tinkerdb.OpenMemory()
+	c, err := tinkercoord.New(tinkercoord.Config{Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutModel(nil, tinkerdb.Model{
+		ID:          "model-a",
+		SessionID:   "session-a",
+		BaseModel:   "Qwen/Qwen3-8B",
+		TokenizerID: "Qwen/Qwen3-8B",
+		IsLoRA:      true,
+		LoRARank:    8,
+		CreatedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+
+	tinkerPath := "tinker://model-a/weights/ckpt"
+	runID := strings.Split(strings.TrimPrefix(tinkerPath, "tinker://"), "/")[0]
+	var run tinkercoord.TrainingRun
+	getJSON(t, h, "/api/v1/training_runs/"+runID+"?access_scope=accessible", &run)
+	if run.TrainingRunID != "model-a" {
+		t.Fatalf("training_run_id = %q, want model-a", run.TrainingRunID)
+	}
+	if run.BaseModel != "Qwen/Qwen3-8B" {
+		t.Fatalf("base_model = %q, want Qwen/Qwen3-8B", run.BaseModel)
+	}
+	if !run.IsLoRA || run.LoRARank != 8 {
+		t.Fatalf("run = %#v, want lora rank 8", run)
+	}
+}
+
 func TestSamplerRESTRoute(t *testing.T) {
 	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
