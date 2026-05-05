@@ -64,6 +64,17 @@ func TestDashboardRoutes(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/app.js", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /app.js status = %d", rec.Code)
+	}
+	for _, want := range []string{"Queue", "Recent Failures", "ArtifactsTable"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("app.js missing %q", want)
+		}
+	}
+
+	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/web/dashboard", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET dashboard status = %d body = %s", rec.Code, rec.Body.String())

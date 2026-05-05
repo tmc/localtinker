@@ -188,7 +188,7 @@ p, .muted {
 
 table {
   border-collapse: collapse;
-  min-width: 760px;
+  min-width: 860px;
   width: 100%;
 }
 
@@ -292,13 +292,41 @@ tbody tr:last-child td {
   font-weight: 600;
 }
 
+.queuegrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.queuebox {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.queuebox span, .queuebox small {
+  color: var(--muted);
+  display: block;
+}
+
+.queuebox strong {
+  display: block;
+  font-size: 22px;
+  margin: 4px 0;
+}
+
+code {
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 860px) {
   .topbar {
     align-items: start;
     flex-direction: column;
   }
 
-  .metrics, .layout, .rungrid {
+  .metrics, .layout, .rungrid, .queuegrid {
     grid-template-columns: 1fr;
   }
 

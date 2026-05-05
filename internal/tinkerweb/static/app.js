@@ -42,6 +42,8 @@ function App() {
     h('section', { class: 'metrics' },
       metric('Nodes', totals.nodes),
       metric('Active leases', totals.activeLeases),
+      metric('Queued', totals.queued),
+      metric('Failures', totals.failures),
       metric('Models', totals.models),
       metric('Futures', totals.futures),
       metric('Artifacts', totals.artifacts),
@@ -60,6 +62,10 @@ function Dashboard({ data, updatedAt }) {
     h('section', { class: 'panel wide' },
       h(SectionHead, { title: 'Nodes', detail: `${(mesh.nodes || []).length} registered` }),
       h(NodesTable, { nodes: mesh.nodes || [] })
+    ),
+    h('section', { class: 'panel wide' },
+      h(SectionHead, { title: 'Queue', detail: queueDetail(coord.queue || {}) }),
+      h(QueueTable, { queue: coord.queue || {} })
     ),
     h('section', { class: 'panel wide' },
       h(SectionHead, { title: 'Run Detail', detail: runDetail(coord.futures || []).detail }),
@@ -90,11 +96,13 @@ function Dashboard({ data, updatedAt }) {
         `${shortID(s.session_id)} · heartbeat ${s.heartbeat_n}`
       ) })
     ),
-    h('section', { class: 'panel' },
+    h('section', { class: 'panel wide' },
       h(SectionHead, { title: 'Artifacts', detail: `${(mesh.artifacts || []).length}` }),
-      h(List, { items: (mesh.artifacts || []).map(a =>
-        `${a.alias || shortID(a.root_hash)} · ${a.kind || 'artifact'} · ${a.storage || 'unknown'}`
-      ) })
+      h(ArtifactsTable, { artifacts: mesh.artifacts || [] })
+    ),
+    h('section', { class: 'panel wide' },
+      h(SectionHead, { title: 'Recent Failures', detail: `${failureFutures(coord.futures || []).length}` }),
+      h(FailuresTable, { futures: failureFutures(coord.futures || []).slice(0, 8) })
     ),
     h('section', { class: 'panel wide' },
       h(SectionHead, { title: 'Futures', detail: `${(coord.futures || []).length} recent` }),
@@ -113,6 +121,8 @@ function NodesTable({ nodes }) {
         h('th', null, 'Load'),
         h('th', null, 'Memory'),
         h('th', null, 'Temp'),
+        h('th', null, 'Artifacts'),
+        h('th', null, 'Last command'),
         h('th', null, 'Last seen'),
         h('th', null, 'Peer')
       )),
@@ -125,12 +135,32 @@ function NodesTable({ nodes }) {
           h('td', null, `${load.active_leases || 0} leases / ${load.queued_operations || 0} queued`),
           h('td', null, formatBytes(load.memory_available_bytes || 0)),
           h('td', null, load.temperature_celsius ? `${load.temperature_celsius.toFixed(1)} C` : 'n/a'),
+          h('td', null, String(node.artifacts || 0)),
+          h('td', null, commandLabel(labels)),
           h('td', null, relativeTime(node.last_seen_at)),
           h('td', null, labels.artifact_peer_url || labels.peer_url || 'n/a')
         );
       }))
     )
   );
+}
+
+function QueueTable({ queue }) {
+  const rows = [
+    ['Queued', queue.queued || 0, queue.queued_bytes || 0],
+    ['Running', queue.running || 0, queue.running_bytes || 0],
+    ['Complete', queue.complete || 0, queue.result_bytes || 0],
+    ['User error', queue.user_error || 0, 0],
+    ['System error', queue.system_error || 0, 0],
+    ['Canceled', queue.canceled || 0, 0]
+  ];
+  return h('div', { class: 'queuegrid' }, rows.map(([label, count, bytes]) =>
+    h('section', { class: 'queuebox', key: label },
+      h('span', null, label),
+      h('strong', null, String(count)),
+      h('small', null, bytes ? formatBytes(bytes) : '')
+    )
+  ));
 }
 
 function ModelsTable({ models }) {
@@ -233,6 +263,52 @@ function FuturesTable({ futures }) {
   );
 }
 
+function ArtifactsTable({ artifacts }) {
+  if (!artifacts.length) return h(Empty, { text: 'No artifacts published yet.' });
+  return h('div', { class: 'tablewrap' },
+    h('table', null,
+      h('thead', null, h('tr', null,
+        h('th', null, 'Alias'),
+        h('th', null, 'Kind'),
+        h('th', null, 'Storage'),
+        h('th', null, 'Root')
+      )),
+      h('tbody', null, artifacts.map(artifact =>
+        h('tr', { key: artifact.root_hash },
+          h('td', null, artifact.alias || 'n/a'),
+          h('td', null, artifact.kind || 'artifact'),
+          h('td', null, artifact.storage || 'unknown'),
+          h('td', null, h('code', null, artifact.root_hash || 'n/a'))
+        )
+      ))
+    )
+  );
+}
+
+function FailuresTable({ futures }) {
+  if (!futures.length) return h(Empty, { text: 'No recent failures.' });
+  return h('div', { class: 'tablewrap' },
+    h('table', null,
+      h('thead', null, h('tr', null,
+        h('th', null, 'Future'),
+        h('th', null, 'Operation'),
+        h('th', null, 'State'),
+        h('th', null, 'Failure'),
+        h('th', null, 'When')
+      )),
+      h('tbody', null, futures.map(future =>
+        h('tr', { key: future.id },
+          h('td', null, shortID(future.id)),
+          h('td', null, operationLabel(future.operation)),
+          h('td', null, h('span', { class: `pill ${future.state}` }, future.state || 'unknown')),
+          h('td', null, future.error || `${formatBytes(future.error_bytes || 0)} error payload`),
+          h('td', null, relativeTime(future.completed_at || future.created_at))
+        )
+      ))
+    )
+  );
+}
+
 function SectionHead({ title, detail }) {
   return h('div', { class: 'sectionhead' }, h('h2', null, title), h('span', null, detail));
 }
@@ -261,10 +337,13 @@ function summarize(data) {
   const coord = (data && data.coordinator) || {};
   const mesh = (data && data.mesh) || {};
   const nodes = mesh.nodes || [];
+  const queue = coord.queue || {};
   const detail = runDetail(coord.futures || []);
   return {
     nodes: nodes.length,
     activeLeases: nodes.reduce((n, node) => n + (((node.load || {}).active_leases) || 0), 0),
+    queued: queue.queued || 0,
+    failures: (queue.user_error || 0) + (queue.system_error || 0) + (queue.canceled || 0),
     models: (coord.models || []).length,
     futures: (coord.futures || []).length,
     artifacts: (mesh.artifacts || []).length,
@@ -272,6 +351,25 @@ function summarize(data) {
     lastLoss: detail.loss == null ? 'n/a' : detail.loss.toFixed(4),
     optimizerStep: detail.optimizerStep == null ? 'n/a' : detail.optimizerStep
   };
+}
+
+function queueDetail(queue) {
+  return `${queue.running || 0} running / ${queue.queued || 0} queued`;
+}
+
+function failureFutures(futures) {
+  return futures.filter(future =>
+    future.error || future.error_bytes > 0 || ['user_error', 'system_error', 'canceled'].includes(future.state)
+  );
+}
+
+function commandLabel(labels) {
+  const id = labels.last_command_ack_id || '';
+  const kind = labels.last_command_ack_kind || '';
+  if (!id && !kind) return 'n/a';
+  if (!kind) return shortID(id);
+  if (!id) return operationLabel(kind);
+  return `${operationLabel(kind)} ${shortID(id)}`;
 }
 
 function runDetail(futures) {
