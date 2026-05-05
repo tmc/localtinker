@@ -78,32 +78,37 @@ func TestDenseCrossEntropyBatchRejectsBadTargetsAndWeights(t *testing.T) {
 		}
 	}
 	tests := []struct {
-		name string
-		edit func(*ForwardBackwardInput)
+		name    string
+		edit    func(*ForwardBackwardInput)
+		wantErr bool
 	}{
 		{
 			name: "fractional target",
 			edit: func(in *ForwardBackwardInput) {
 				in.Data[0].LossFnInputs["target_tokens"] = TensorData{Data: []float64{3.5, 4}, DType: "int64"}
 			},
+			wantErr: true,
 		},
 		{
 			name: "out of range target",
 			edit: func(in *ForwardBackwardInput) {
 				in.Data[0].LossFnInputs["target_tokens"] = TensorData{Data: []float64{float64(math.MaxInt32) + 1, 4}, DType: "int64"}
 			},
+			wantErr: true,
 		},
 		{
 			name: "negative weight",
 			edit: func(in *ForwardBackwardInput) {
 				in.Data[0].LossFnInputs["weights"] = TensorData{Data: []float64{1, -1}, DType: "float32"}
 			},
+			wantErr: true,
 		},
 		{
 			name: "non finite weight",
 			edit: func(in *ForwardBackwardInput) {
 				in.Data[0].LossFnInputs["weights"] = TensorData{Data: []float64{1, math.Inf(1)}, DType: "float32"}
 			},
+			wantErr: true,
 		},
 		{
 			name: "zero total weight",
@@ -116,14 +121,19 @@ func TestDenseCrossEntropyBatchRejectsBadTargetsAndWeights(t *testing.T) {
 			edit: func(in *ForwardBackwardInput) {
 				in.Data[0].ModelInput.Chunks = []ModelInputChunk{{Type: "image", Tokens: []int{1, 2}}}
 			},
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			in := base()
 			tt.edit(&in)
-			if _, err := newDenseBatch(in); err == nil {
+			_, err := newDenseBatch(in)
+			if tt.wantErr && err == nil {
 				t.Fatal("newDenseBatch succeeded, want error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("newDenseBatch error = %v, want nil", err)
 			}
 		})
 	}

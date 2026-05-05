@@ -1,0 +1,36 @@
+python sdk_custom_loss.py
+stdout 'SDK_CUSTOM_LOSS_OK'
+
+-- sdk_custom_loss.py --
+import tinker
+import torch
+from tinker import ServiceClient
+
+
+client = ServiceClient()
+try:
+    training = client.create_lora_training_client(
+        base_model="Qwen/Qwen3-8B",
+        rank=8,
+    )
+    data = [
+        tinker.Datum(
+            model_input=tinker.ModelInput.from_ints([1, 1, 1, 1]),
+            loss_fn_inputs={"target_tokens": [1, 1, 1, 1]},
+        )
+    ]
+
+    def custom_loss(batch, logprobs):
+        assert len(batch) == 1, batch
+        assert len(logprobs) == 1, logprobs
+        loss = -logprobs[0].mean()
+        return loss, {"custom_loss:mean": float(loss.detach())}
+
+    result = training.forward_backward_custom(data, custom_loss).result(timeout=120)
+    assert "custom_loss:mean" in result.metrics, result.metrics
+    assert torch.isfinite(torch.tensor(result.metrics["custom_loss:mean"])), result.metrics
+    step = training.optim_step(tinker.AdamParams(learning_rate=1e-4)).result(timeout=120)
+    assert step.metrics.get("optimizer_backend:mlx") == 1, step.metrics
+    print("SDK_CUSTOM_LOSS_OK", result.metrics["custom_loss:mean"])
+finally:
+    client.holder.close()
