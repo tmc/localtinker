@@ -451,6 +451,9 @@ func (c *Coordinator) Checkpoints(ctx context.Context, trainingRunID string, lim
 		return filtered[i].Time.After(filtered[j].Time)
 	})
 	if trainingRunID != "" {
+		if filtered == nil {
+			filtered = []Checkpoint{}
+		}
 		return CheckpointsResponse{Checkpoints: filtered}, nil
 	}
 	if limit <= 0 {
@@ -466,6 +469,9 @@ func (c *Coordinator) Checkpoints(ctx context.Context, trainingRunID string, lim
 	end := offset + limit
 	if end > total {
 		end = total
+	}
+	if filtered == nil {
+		filtered = []Checkpoint{}
 	}
 	return CheckpointsResponse{
 		Checkpoints: filtered[offset:end],

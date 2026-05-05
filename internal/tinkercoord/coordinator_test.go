@@ -63,6 +63,29 @@ func TestCapabilitiesAdvertiseSamplerConformance(t *testing.T) {
 	}
 }
 
+func TestEmptyCheckpointListsAreNonNil(t *testing.T) {
+	c, err := New(Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := c.Checkpoints(context.Background(), "", 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all.Checkpoints == nil {
+		t.Fatal("all checkpoints slice is nil")
+	}
+
+	run, err := c.Checkpoints(context.Background(), "missing-model", 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Checkpoints == nil {
+		t.Fatal("training-run checkpoints slice is nil")
+	}
+}
+
 func TestRetrieveFutureMetadataThenComplete(t *testing.T) {
 	c, err := New(Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
