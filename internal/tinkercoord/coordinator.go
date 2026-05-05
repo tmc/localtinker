@@ -227,7 +227,6 @@ func New(cfg Config) (*Coordinator, error) {
 		sem:             make(chan struct{}, cfg.MaxOperations),
 	}
 	c.recoverUnfinished(context.Background())
-	c.dispatchQueued(context.Background())
 	return c, nil
 }
 
@@ -959,8 +958,6 @@ func (c *Coordinator) recoverUnfinished(ctx context.Context) {
 		}, FutureSystemError)
 	}
 }
-
-func (c *Coordinator) dispatchQueued(context.Context) {}
 
 func (c *Coordinator) UserErrorFuture(ctx context.Context, message string) (Future, error) {
 	now := c.now().UTC()
