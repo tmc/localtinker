@@ -3,6 +3,7 @@ package tinker
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 )
@@ -159,6 +160,35 @@ func TestCrossEntropyTensorDataValidation(t *testing.T) {
 				}
 			},
 			want: `weights dtype "float64", want float32`,
+		},
+		{
+			name: "negative weight tensor",
+			edit: func(in *LossInput) {
+				in.WeightsTensor = TensorData{
+					Data:  []float64{1, -1, 1, 1},
+					DType: "float32",
+					Shape: []int{2, 2},
+				}
+			},
+			want: "weights tensor contains invalid weight",
+		},
+		{
+			name: "non finite weight tensor",
+			edit: func(in *LossInput) {
+				in.WeightsTensor = TensorData{
+					Data:  []float64{1, math.Inf(1), 1, 1},
+					DType: "float32",
+					Shape: []int{2, 2},
+				}
+			},
+			want: "weights tensor contains invalid weight",
+		},
+		{
+			name: "negative legacy weight",
+			edit: func(in *LossInput) {
+				in.Weights = []float32{1, 1, -1, 1}
+			},
+			want: "weights contain invalid weight",
 		},
 		{
 			name: "legacy and tensor target",
