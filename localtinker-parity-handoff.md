@@ -2,7 +2,7 @@
 
 Date: 2026-05-05
 Repo: `/Volumes/tmc/go/src/github.com/tmc/localtinker`
-Current HEAD: `cbea8b0 docs: record broad packaging gate`
+Current HEAD: `544d941 docs: refresh current test evidence`
 Notebook ID: `a912d601-badc-409b-bbdb-daf9316b843b`
 
 Do not push.
@@ -39,7 +39,7 @@ Continue the loop:
 
 Current local tree:
 
-- HEAD: `cbea8b0 docs: record broad packaging gate`
+- HEAD: `544d941 docs: refresh current test evidence`
 - Worktree/index were clean before this handoff file was created.
 - This handoff file is intentionally uncommitted unless the user asks otherwise.
 
@@ -49,7 +49,7 @@ Notebook sources before this handoff:
 - `localtinker-sdk-parity-status.md` source: `323aa0c2-76ba-4323-bafb-7307e86f249f`
 - `repo: tinker sdk` source: `7c9465b0-2583-48ba-a288-e7ab5ff8e3b2`
 
-Important: ACDCF committed `cbea8b0` after the last NotebookLM answer was requested. Resync NotebookLM at `cbea8b0` before acting on the last verdict.
+Important: keep this file current if HEAD moves; resync NotebookLM before acting on any older verdict.
 
 ## Landed Parity Work
 
@@ -77,19 +77,23 @@ Covered:
 - Dense CE hosted/local artifact and docs.
 - Hosted cancel absence documented.
 - Broad packaging gate passed and recorded in docs.
+- Hosted-comparison metadata scrubbed.
+- Current test evidence refreshed.
 
 ## Latest NotebookLM Verdict
 
-The last NotebookLM answer, generated before syncing `cbea8b0`, said `NOT COMPLETE` and proposed:
+The latest NotebookLM answer at `544d941` said `NOT COMPLETE` and proposed:
 
 - Implement missing REST route mapping for `get_training_run_by_tinker_path`.
 - Files suggested:
-  - `internal/tinkerhttp/routes.go`
+  - `cmd/localtinker/testdata/sdk_smoke.txt`
   - `internal/tinkerhttp/routes_test.go`
 - Suggested focused test:
   `GOWORK=off go test ./internal/tinkerhttp -run TestGetTrainingRunByTinkerPath -count=1`
 
-Because that verdict was based on sources before the docs packaging commit, first resync NotebookLM at `cbea8b0` and ask again. If NotebookLM repeats this gap, verify it against upstream SDK before patching.
+The SDK method parses the tinker path client-side and calls
+`GET /api/v1/training_runs/{training_run_id}`. The current patch adds focused
+coverage proving that path instead of adding a nonexistent SDK route.
 
 Useful upstream SDK lookup:
 
@@ -196,15 +200,15 @@ This is documented in `docs/internal/conformance.md` by `369a63f`.
 
 ## Next Best Step
 
-1. Sync NotebookLM at `cbea8b0`.
+1. Sync NotebookLM at the current HEAD.
 2. Ask strict verdict again.
-3. If NotebookLM repeats `get_training_run_by_tinker_path`, verify upstream SDK route and local route gap.
-4. If real, implement a focused route/test patch.
-5. Run:
+3. If the current `get_training_run_by_tinker_path` patch is not committed yet,
+   commit it cleanly, no push.
+4. Run or verify:
 
 ```sh
-GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off /Users/tmc/.local/homebrew/bin/go test ./internal/tinkerhttp -run 'TestGetTrainingRunByTinkerPath|TestSessionRESTRoutes|TestTrainingRun' -count=1
+GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off /Users/tmc/.local/homebrew/bin/go test ./internal/tinkerhttp -run TestGetTrainingRunByTinkerPath -count=1
+GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off /Users/tmc/.local/homebrew/bin/go test ./cmd/localtinker -run 'TestPythonSDKScript/sdk_smoke' -count=1
 ```
 
-6. Commit cleanly, no push.
-7. Resync NotebookLM and repeat.
+5. Resync NotebookLM and repeat.
