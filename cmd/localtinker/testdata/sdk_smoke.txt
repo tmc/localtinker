@@ -3,10 +3,10 @@ stdout 'SDK_SMOKE_OK'
 
 -- sdk_smoke.py --
 import tinker
+import io
 import os
 import tarfile
-from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 import httpx
 from tinker import ServiceClient
@@ -101,10 +101,11 @@ try:
     user_checkpoints = rest.list_user_checkpoints(limit=10).result(timeout=120)
     assert any(c.tinker_path == saved.path for c in user_checkpoints.checkpoints), user_checkpoints
     archive = rest.get_checkpoint_archive_url_from_tinker_path(saved.path).result(timeout=120)
-    assert archive.url.startswith("file://"), archive
-    archive_path = Path(unquote(urlparse(archive.url).path))
-    assert archive_path.is_file(), archive
-    with tarfile.open(archive_path) as tf:
+    archive_url = urlparse(archive.url)
+    assert archive_url.scheme in {"http", "https"} and archive_url.netloc, archive
+    archive_resp = httpx.get(archive.url, timeout=120, follow_redirects=True)
+    archive_resp.raise_for_status()
+    with tarfile.open(fileobj=io.BytesIO(archive_resp.content)) as tf:
         names = set(tf.getnames())
     assert "adapters.safetensors" in names, names
     assert "checkpoint.json" in names, names

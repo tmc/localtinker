@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -863,11 +864,16 @@ func (s *Server) checkpointAction(w http.ResponseWriter, r *http.Request, path s
 			return true
 		}
 		expires := time.Now().UTC().Add(15 * time.Minute)
-		w.Header().Set("Location", "file://"+file)
 		w.Header().Set("Expires", expires.Format(http.TimeFormat))
 		w.Header().Set("X-Tinker-Archive-Expires-At", expires.Format(time.RFC3339))
 		w.Header().Set("X-Tinker-Archive-Owner", "local")
 		w.Header().Set("X-Tinker-Archive-Visibility", "private")
+		if r.URL.Query().Get("download") == "1" {
+			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(file)))
+			http.ServeFile(w, r, file)
+			return true
+		}
+		w.Header().Set("Location", archiveDownloadURL(r))
 		w.WriteHeader(http.StatusFound)
 	case r.Method == http.MethodDelete && action == "":
 		if err := tinkertrain.DeleteCheckpoint(tinkerPath); err != nil {
@@ -906,6 +912,25 @@ func (s *Server) checkpointAction(w http.ResponseWriter, r *http.Request, path s
 		writeError(w, http.StatusNotFound, "not_found", "unsupported checkpoint route")
 	}
 	return true
+}
+
+func archiveDownloadURL(r *http.Request) string {
+	u := *r.URL
+	q := u.Query()
+	q.Set("download", "1")
+	u.RawQuery = q.Encode()
+	u.Scheme = "http"
+	if r.TLS != nil {
+		u.Scheme = "https"
+	}
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		u.Scheme = strings.TrimSpace(strings.Split(proto, ",")[0])
+	}
+	u.Host = r.Host
+	if host := r.Header.Get("X-Forwarded-Host"); host != "" {
+		u.Host = strings.TrimSpace(strings.Split(host, ",")[0])
+	}
+	return u.String()
 }
 
 func (s *Server) writeFutureResult(w http.ResponseWriter, future tinkercoord.Future) {

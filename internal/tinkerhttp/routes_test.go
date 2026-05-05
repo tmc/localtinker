@@ -1,10 +1,13 @@
 package tinkerhttp
 
 import (
+	"archive/tar"
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1009,6 +1012,52 @@ func TestCheckpointActionsTrackMetadata(t *testing.T) {
 	}
 	if rec.Header().Get("X-Tinker-Archive-Visibility") != "private" {
 		t.Fatalf("archive visibility = %q", rec.Header().Get("X-Tinker-Archive-Visibility"))
+	}
+	location := rec.Header().Get("Location")
+	u, err := url.Parse(location)
+	if err != nil {
+		t.Fatalf("archive location %q: %v", location, err)
+	}
+	if u.Scheme != "http" || u.Host != "example.com" || u.Query().Get("download") != "1" {
+		t.Fatalf("archive location = %q, want http://example.com download URL", location)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, u.RequestURI(), nil)
+	req.Host = u.Host
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("download status = %d, want %d body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if !strings.Contains(rec.Header().Get("Content-Disposition"), "attachment;") {
+		t.Fatalf("content disposition = %q", rec.Header().Get("Content-Disposition"))
+	}
+	names := map[string]bool{}
+	tr := tar.NewReader(bytes.NewReader(rec.Body.Bytes()))
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		names[header.Name] = true
+	}
+	if !names["adapters.safetensors"] {
+		t.Fatalf("download archive missing adapters.safetensors in %v", names)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, base+"/archive", nil)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-Host", "tinker.example")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("proxied archive status = %d, want %d body = %s", rec.Code, http.StatusFound, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); !strings.HasPrefix(got, "https://tinker.example/") {
+		t.Fatalf("proxied archive location = %q", got)
 	}
 
 	methodJSON(t, h, http.MethodDelete, base+"/publish", nil, http.StatusOK, &map[string]any{})
