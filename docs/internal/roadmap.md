@@ -57,6 +57,8 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
   full MLX smoke workflow.
 - `docs/internal/conformance.md` records the local SDK conformance coverage and
   hosted-comparison gaps.
+- Cross-entropy accepts dense target tensors and returns per-token logprobs in
+  local MLX tests.
 
 ## 1. SDK Conformance
 
@@ -75,14 +77,14 @@ supported surface.
 
 ## 2. Cross-Entropy Contract
 
-Goal: implement the real `cross_entropy` tensor contract instead of relying on
-the current shifted-token shortcut.
+Goal: keep the local `cross_entropy` tensor contract aligned with hosted
+behavior.
 
-- Infer a 1D shape for flattened `TensorData` when `shape` is omitted.
-- Accept rectangular dense target tensors.
+- Keep coverage for 1D shape inference when `TensorData.shape` is omitted.
+- Keep coverage for rectangular dense target tensors.
 - Reject ragged tensors and shape/data mismatches at the HTTP boundary.
-- Support target tensors that are not just `model_input` shifted left by one.
-- Support arbitrary valid float weights.
+- Keep support for targets that are not just `model_input` shifted left by one.
+- Keep support for arbitrary valid float weights.
 - Validate target/weight shape compatibility.
 - Return real per-token logprobs where the SDK expects them.
 
@@ -184,10 +186,8 @@ Goal: keep local behavior honest against hosted Tinker.
 ## Known Gaps
 
 - No true async scheduler or operation-level backpressure yet.
-- `cross_entropy` still uses a shifted-token MLX training path.
 - Arbitrary non-prefix fractional weights are not fully supported.
-- Prompt logprobs and top-k prompt logprobs are not implemented.
-- String stops need tokenizer-backed sampling.
+- Top-k prompt logprobs are not implemented.
 - Optimizer state is not persisted.
 - Checkpoint archive URLs point at local tar files; hosted download and
   ownership enforcement remain incomplete.
@@ -197,8 +197,8 @@ Goal: keep local behavior honest against hosted Tinker.
 ## Next Milestones
 
 1. Expand SDK conformance tests for all currently supported routes.
-2. Replace shifted-token-only loss handling with dense CE tensors.
+2. Compare dense CE losses and logprobs against a hosted run.
 3. Add hosted-style checkpoint download ownership and retention enforcement.
 4. Add operation queue state and asynchronous futures.
 5. Remove temporary MLX/module replaces and document MLX library setup.
-6. Add tokenizer-backed string stops and generated-token logprobs.
+6. Add top-k prompt logprobs.
