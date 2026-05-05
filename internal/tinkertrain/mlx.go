@@ -21,6 +21,33 @@ import (
 )
 
 const checkpointCompleteFile = "complete"
+const checkpointMetadataFile = "checkpoint.json"
+const checkpointOptimizerFile = "optimizer_state.json"
+
+type checkpointMetadata struct {
+	Format       string `json:"format"`
+	Version      int    `json:"version"`
+	ModelID      string `json:"model_id"`
+	BaseModel    string `json:"base_model"`
+	Kind         string `json:"kind"`
+	Name         string `json:"name"`
+	IsLoRA       bool   `json:"is_lora"`
+	LoRARank     int    `json:"lora_rank"`
+	TrainMLP     bool   `json:"train_mlp"`
+	TrainAttn    bool   `json:"train_attn"`
+	TrainUnembed bool   `json:"train_unembed"`
+	HasOptimizer bool   `json:"has_optimizer"`
+	Step         int    `json:"step"`
+}
+
+type optimizerState struct {
+	Format         string     `json:"format"`
+	Version        int        `json:"version"`
+	Optimizer      string     `json:"optimizer"`
+	Step           int        `json:"step"`
+	LastAdam       AdamParams `json:"last_adam"`
+	PendingBatches int        `json:"pending_batches"`
+}
 
 type mlxModel struct {
 	mu       sync.Mutex
@@ -32,6 +59,7 @@ type mlxModel struct {
 	step     int
 	pending  denseBatch
 	lastLoss float64
+	lastAdam AdamParams
 }
 
 func newMLXModel(ctx context.Context, modelID string, cfg CreateConfig) (*mlxModel, error) {
@@ -134,6 +162,7 @@ func (m *mlxModel) optimStep(ctx context.Context, params AdamParams) (OptimStepO
 	}
 	m.pending = denseBatch{}
 	m.lastLoss = loss
+	m.lastAdam = params
 	m.step++
 
 	return OptimStepOutput{Metrics: map[string]float64{
@@ -144,14 +173,14 @@ func (m *mlxModel) optimStep(ctx context.Context, params AdamParams) (OptimStepO
 }
 
 func (m *mlxModel) saveForSampler(_ context.Context, name string) (string, error) {
-	return m.saveAdapter(name, "sampler_weights")
+	return m.saveAdapter(name, "sampler_weights", false)
 }
 
 func (m *mlxModel) saveState(_ context.Context, name string) (string, error) {
-	return m.saveAdapter(name, "weights")
+	return m.saveAdapter(name, "weights", true)
 }
 
-func (m *mlxModel) saveAdapter(name, kind string) (string, error) {
+func (m *mlxModel) saveAdapter(name, kind string, optimizer bool) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if name == "" {
@@ -171,22 +200,62 @@ func (m *mlxModel) saveAdapter(name, kind string) (string, error) {
 	if err := lmtrain.SaveAdapterConfig(dir, "lora", layers, m.adapters.Config()); err != nil {
 		return "", fmt.Errorf("save adapter config: %w", err)
 	}
+	meta := checkpointMetadata{
+		Format:       "localtinker.checkpoint",
+		Version:      1,
+		ModelID:      m.id,
+		BaseModel:    m.base,
+		Kind:         kind,
+		Name:         cleanName(name),
+		IsLoRA:       true,
+		LoRARank:     m.rank,
+		TrainMLP:     true,
+		TrainAttn:    true,
+		TrainUnembed: false,
+		HasOptimizer: optimizer,
+		Step:         m.step,
+	}
+	if err := writeJSONFile(filepath.Join(dir, checkpointMetadataFile), meta); err != nil {
+		return "", fmt.Errorf("write checkpoint metadata: %w", err)
+	}
+	if optimizer {
+		state := optimizerState{
+			Format:         "localtinker.optimizer",
+			Version:        1,
+			Optimizer:      "adamw",
+			Step:           m.step,
+			LastAdam:       m.lastAdam,
+			PendingBatches: len(m.pending.rows),
+		}
+		if err := writeJSONFile(filepath.Join(dir, checkpointOptimizerFile), state); err != nil {
+			return "", fmt.Errorf("write optimizer state: %w", err)
+		}
+	}
 	if err := os.WriteFile(filepath.Join(dir, checkpointCompleteFile), []byte("ok\n"), 0644); err != nil {
 		return "", fmt.Errorf("write completion marker: %w", err)
 	}
 	return "tinker://" + m.id + "/" + kind + "/" + cleanName(name), nil
 }
 
-func (m *mlxModel) loadState(_ context.Context, path string) error {
+func (m *mlxModel) loadState(_ context.Context, path string, optimizer bool) error {
 	parsed, err := ParseTinkerPath(path)
 	if err != nil {
 		return err
 	}
-	file := filepath.Join(checkpointDir(parsed), "adapters.safetensors")
+	dir := checkpointDir(parsed)
+	file := filepath.Join(dir, "adapters.safetensors")
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.adapters.LoadWeights(file); err != nil {
 		return fmt.Errorf("load adapter weights: %w", err)
+	}
+	if optimizer {
+		state, err := readOptimizerState(filepath.Join(dir, checkpointOptimizerFile))
+		if err != nil {
+			return err
+		}
+		m.step = state.Step
+		m.lastAdam = state.LastAdam
 	}
 	return nil
 }
@@ -687,6 +756,31 @@ func DeleteCheckpoint(path string) error {
 		return err
 	}
 	return os.RemoveAll(checkpointDir(parsed))
+}
+
+func writeJSONFile(path string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '
+')
+	return os.WriteFile(path, data, 0644)
+}
+
+func readOptimizerState(path string) (optimizerState, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return optimizerState{}, fmt.Errorf("load optimizer state: %w", err)
+	}
+	var state optimizerState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return optimizerState{}, fmt.Errorf("load optimizer state: %w", err)
+	}
+	if state.Format != "localtinker.optimizer" || state.Version != 1 {
+		return optimizerState{}, fmt.Errorf("load optimizer state: unsupported format")
+	}
+	return state, nil
 }
 
 func checkpointDir(path TinkerPath) string {
