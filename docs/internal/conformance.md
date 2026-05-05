@@ -163,7 +163,7 @@ limited public beta only if the caveats below are stated plainly.
 | Custom losses | `docs/internal/hosted-comparison/20260505-ecc480f-custom-loss-hosted-local.jsonl` records hosted and local `forward_backward_custom` success and `custom_loss:mean` metric shape evidence. | Beta-ready with numeric caveats. |
 | Sampling | Generated logprobs, prompt logprobs, deterministic seed flow, string stops, and top-k prompt logprob shapes are covered locally and in hosted comparison rows. | Beta-ready with numeric/distribution caveats. |
 | Packaging | Clean-checkout `GOCACHE=/tmp/localtinker-gocache.AsjiEe GOWORK=off go test ./...` passed at `369a63f`. | Beta-ready; rerun before any release commit. |
-| Secrets and artifacts | Hosted comparison JSONL artifacts currently record a private local Python executable path and must be scrubbed before publicizing. No keys, binaries, downloaded weights, generated caches, or private model paths should be staged. | Hard launch gate. |
+| Secrets and artifacts | Hosted comparison JSONL artifacts use scrubbed runner metadata (`python`, `local-runner`). No keys, binaries, downloaded weights, generated caches, or private model paths should be staged. | Beta-ready; keep scanning before release. |
 
 ## Known Differences
 
