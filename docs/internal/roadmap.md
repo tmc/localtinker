@@ -193,7 +193,7 @@ Goal: keep local behavior honest against hosted Tinker.
   compared.
 - Arbitrary non-prefix fractional weights are not fully supported.
 - Top-k prompt logprobs are not implemented.
-- Checkpoint archive URLs point at local tar files; hosted download and
+- Checkpoint archive URLs are local HTTP download URLs; hosted download and
   ownership enforcement remain incomplete.
 - The MLX dependency graph still needs temporary sibling-checkout replaces.
 - Hosted numerics and local MLX numerics will differ.
