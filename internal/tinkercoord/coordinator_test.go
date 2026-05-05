@@ -142,6 +142,61 @@ func TestQueuedFutureLifecycleAndDashboardQueue(t *testing.T) {
 	}
 }
 
+func TestFutureQueueBoundsConcurrency(t *testing.T) {
+	store := tinkerdb.OpenMemory()
+	c, err := New(Config{
+		Store:         store,
+		MaxOperations: 1,
+		LeaseTimeout:  time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	first, err := c.EnqueueFuture(context.Background(),
+		map[string]any{"type": "forward", "model_id": "model-a"},
+		10,
+		func(context.Context) (any, error) {
+			close(firstStarted)
+			<-releaseFirst
+			return map[string]any{"first": true}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-firstStarted
+	eventuallyStoredState(t, store, first.ID, FutureRunning)
+	second, err := c.EnqueueFuture(context.Background(),
+		map[string]any{"type": "forward", "model_id": "model-b"},
+		20,
+		func(context.Context) (any, error) {
+			return map[string]any{"second": true}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	secondState := eventuallyStoredState(t, store, second.ID, FutureQueued)
+	if secondState.RequestBytes != 20 {
+		t.Fatalf("second request bytes = %d, want 20", secondState.RequestBytes)
+	}
+
+	snap, err := c.DashboardSnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Queue.Running != 1 || snap.Queue.Queued != 1 {
+		t.Fatalf("queue = %#v, want one running and one queued", snap.Queue)
+	}
+	close(releaseFirst)
+	eventuallyFutureState(t, c, first.ID, FutureComplete)
+	eventuallyFutureState(t, c, second.ID, FutureComplete)
+}
+
 func TestCancelQueuedFuture(t *testing.T) {
 	c, err := New(Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
@@ -203,6 +258,48 @@ func TestRunningFutureLeaseExpiry(t *testing.T) {
 	}
 	if got.State != FutureSystemError {
 		t.Fatalf("state = %q, want %q", got.State, FutureSystemError)
+	}
+}
+
+func TestRecoverUnfinishedFuturesAfterRestart(t *testing.T) {
+	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	store := tinkerdb.OpenMemory()
+	for _, future := range []tinkerdb.Future{
+		{
+			ID:        "fut-queued",
+			State:     FutureQueued,
+			CreatedAt: now,
+		},
+		{
+			ID:             "fut-running",
+			State:          FutureRunning,
+			CreatedAt:      now,
+			StartedAt:      now,
+			LeaseExpiresAt: now.Add(time.Minute),
+		},
+	} {
+		if err := store.PutFuture(context.Background(), future); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	c, err := New(Config{
+		Store: store,
+		Now: func() time.Time {
+			return now
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"fut-queued", "fut-running"} {
+		got, err := c.RetrieveFuture(context.Background(), id, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.State != FutureSystemError {
+			t.Fatalf("%s state = %q, want %q", id, got.State, FutureSystemError)
+		}
 	}
 }
 
@@ -281,6 +378,24 @@ func eventuallyFutureState(t *testing.T, c *Coordinator, id, want string) Future
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("future %s state = %q, want %q", id, got.State, want)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func eventuallyStoredState(t *testing.T, store tinkerdb.Store, id, want string) tinkerdb.Future {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		got, err := store.GetFuture(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.State == want {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("future %s stored state = %q, want %q", id, got.State, want)
 		}
 		time.Sleep(time.Millisecond)
 	}
