@@ -95,6 +95,25 @@ p, .muted {
   white-space: nowrap;
 }
 
+.topactions {
+  align-items: end;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.nav button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .dot {
   background: var(--muted);
   border-radius: 50%;
@@ -320,14 +339,156 @@ code {
   overflow-wrap: anywhere;
 }
 
+pre {
+  background: color-mix(in srgb, var(--panel), var(--text) 4%);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 0;
+  overflow-x: auto;
+  padding: 12px;
+}
+
+.docs {
+  display: grid;
+  gap: 22px;
+  grid-template-columns: 180px minmax(0, 1fr);
+  margin-top: 18px;
+}
+
+.docnav {
+  align-self: start;
+  border-right: 1px solid var(--line);
+  display: grid;
+  gap: 6px;
+  padding-right: 16px;
+  position: sticky;
+  top: 20px;
+}
+
+.docnav a {
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 8px;
+  text-decoration: none;
+}
+
+.docnav a:hover {
+  background: var(--panel);
+  color: var(--accent);
+}
+
+.docbody {
+  max-width: 900px;
+}
+
+.doctitle {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 22px;
+  padding-bottom: 18px;
+}
+
+.doctitle h1 {
+  font-size: 32px;
+}
+
+.docsection {
+  margin: 0 0 26px;
+}
+
+.docsection h2 {
+  font-size: 18px;
+  margin-bottom: 9px;
+}
+
+.docsection h3 {
+  font-size: 14px;
+  margin: 0 0 5px;
+}
+
+.docsection p + p {
+  margin-top: 10px;
+}
+
+.cardgrid, .capgrid {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.cardgrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.capgrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.feature, .cap {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.cap span {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+}
+
+.cap.yes strong {
+  color: var(--good);
+}
+
+.cap.no strong {
+  color: var(--warn);
+}
+
+.checklist {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.checklist li + li {
+  margin-top: 8px;
+}
+
+.doctable {
+  min-width: 0;
+}
+
+.doctable td:first-child {
+  width: 260px;
+}
+
 @media (max-width: 860px) {
   .topbar {
     align-items: start;
     flex-direction: column;
   }
 
+  .topactions {
+    align-items: start;
+    width: 100%;
+  }
+
+  .nav {
+    justify-content: flex-start;
+  }
+
   .metrics, .layout, .rungrid, .queuegrid {
     grid-template-columns: 1fr;
+  }
+
+  .docs, .cardgrid, .capgrid {
+    grid-template-columns: 1fr;
+  }
+
+  .docnav {
+    border-bottom: 1px solid var(--line);
+    border-right: 0;
+    position: static;
+    padding: 0 0 12px;
   }
 
   .panel.wide {

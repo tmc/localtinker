@@ -46,6 +46,9 @@ func (s *Server) Handler() http.Handler {
 func dashboardPages(files http.Handler) http.Handler {
 	pages := map[string]bool{
 		"/":            true,
+		"/docs":        true,
+		"/quickstart":  true,
+		"/api":         true,
 		"/runs":        true,
 		"/checkpoints": true,
 		"/nodes":       true,
