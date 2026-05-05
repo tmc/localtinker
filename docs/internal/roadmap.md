@@ -55,10 +55,14 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
 - SDK conformance coverage includes handshake, empty REST listings, missing
   future errors, malformed training and async inputs, future id echoing, and a
   full MLX smoke workflow.
+- SDK conformance coverage includes REST session listing and lookup routes.
 - `docs/internal/conformance.md` records the local SDK conformance coverage and
   hosted-comparison gaps.
 - Cross-entropy accepts dense target tensors and returns per-token logprobs in
   local MLX tests.
+- Sampling returns generated token logprobs and prompt logprobs, and accepts
+  tokenizer-backed string stops.
+- Checkpoints include local optimizer state and archive metadata headers.
 
 ## 1. SDK Conformance
 
@@ -90,12 +94,12 @@ behavior.
 
 ## 3. Futures and Scheduling
 
-Goal: replace mostly synchronous execution with a real coordinator scheduler.
+Goal: make coordinator scheduling match hosted behavior where advertised.
 
-- Add an operation queue with queued, running, complete, user_error,
+- Keep coverage for queued, running, complete, user_error,
   system_error, and canceled states.
-- Add bounded concurrency and operation byte accounting.
-- Add cancellation and lease timeout handling.
+- Keep coverage for bounded concurrency and operation byte accounting.
+- Keep coverage for cancellation and lease timeout handling.
 - Persist enough operation metadata to survive coordinator restarts.
 - Match hosted `retrieve_future(..., allow_metadata_only=True)` behavior.
 - Expose queue state in RPC and dashboard views.
@@ -104,7 +108,7 @@ Goal: replace mostly synchronous execution with a real coordinator scheduler.
 
 Goal: make checkpoints useful for both SDK workflows and node sync.
 
-- Store adapter weights, adapter config, optimizer state, and completion markers
+- Keep adapter weights, adapter config, optimizer state, and completion markers
   in a stable checkpoint layout.
 - Serve checkpoint archive URLs with hosted-style expiration metadata.
 - Keep tar archive downloads consumable by the Tinker CLI.
@@ -115,11 +119,11 @@ Goal: make checkpoints useful for both SDK workflows and node sync.
 
 ## 5. Optimizer State
 
-Goal: support real training resume.
+Goal: keep training resume behavior compatible with hosted checkpoints.
 
-- Save optimizer state alongside LoRA weights.
-- Load optimizer state for `load_state_with_optimizer`.
-- Track optimizer step counters.
+- Keep optimizer state saved alongside LoRA weights.
+- Keep `load_state_with_optimizer` support.
+- Keep optimizer step counters.
 - Test train, save, load, resume, and continued loss decrease.
 - Document determinism inputs: seed, model, adapter config, optimizer, data
   order, and MLX backend.
@@ -130,9 +134,9 @@ Goal: make sampling responses match hosted behavior where advertised.
 
 - Keep temperature, top-p, top-k, seed, max tokens, and integer stop tokens
   covered by deterministic sampler tests.
-- Add tokenizer-backed string stops.
-- Return generated token logprobs.
-- Return prompt logprobs when requested.
+- Keep tokenizer-backed string stops covered.
+- Keep generated token logprobs covered.
+- Keep prompt logprobs covered.
 - Add top-k prompt logprobs only when implemented and advertised.
 - Add deterministic sampler tests over a small cached model.
 
@@ -185,10 +189,10 @@ Goal: keep local behavior honest against hosted Tinker.
 
 ## Known Gaps
 
-- No true async scheduler or operation-level backpressure yet.
+- Hosted scheduler timing and operation-level backpressure have not been
+  compared.
 - Arbitrary non-prefix fractional weights are not fully supported.
 - Top-k prompt logprobs are not implemented.
-- Optimizer state is not persisted.
 - Checkpoint archive URLs point at local tar files; hosted download and
   ownership enforcement remain incomplete.
 - The MLX dependency graph still needs temporary sibling-checkout replaces.
@@ -199,6 +203,6 @@ Goal: keep local behavior honest against hosted Tinker.
 1. Expand SDK conformance tests for all currently supported routes.
 2. Compare dense CE losses and logprobs against a hosted run.
 3. Add hosted-style checkpoint download ownership and retention enforcement.
-4. Add operation queue state and asynchronous futures.
+4. Compare local queue state and cancellation behavior against hosted futures.
 5. Remove temporary MLX/module replaces and document MLX library setup.
 6. Add top-k prompt logprobs.
