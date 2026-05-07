@@ -837,6 +837,28 @@ func TestConformanceMalformedTrainingInputsReturnUserErrors(t *testing.T) {
 			want: `unsupported model input chunk type "image"`,
 		},
 		{
+			name: "sparse weights",
+			edit: func(d map[string]any) {
+				d["loss_fn_inputs"].(map[string]any)["weights"] = map[string]any{
+					"data":                []float64{1, 1, 1, 1},
+					"dtype":               "float32",
+					"sparse_crow_indices": []int{0, 1},
+				}
+			},
+			want: "sparse tensors are not supported",
+		},
+		{
+			name: "image asset pointer chunk",
+			edit: func(d map[string]any) {
+				d["model_input"] = map[string]any{
+					"chunks": []any{
+						map[string]any{"type": "image_asset_pointer", "tokens": []int{1, 1, 1, 1}},
+					},
+				}
+			},
+			want: `unsupported model input chunk type "image_asset_pointer"`,
+		},
+		{
 			name: "invalid target category",
 			edit: func(d map[string]any) {
 				d["loss_fn_inputs"].(map[string]any)["target_tokens"] = map[string]any{
