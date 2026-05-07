@@ -75,8 +75,8 @@ Use `/runs` for run summaries, `/checkpoints` for local checkpoint paths,
 
 Beta limits: local checkpoint archive URLs are local HTTP download URLs, hosted
 authorization behavior is not reproduced, hosted numeric parity is not
-recorded, top-k prompt logprobs are not implemented, and model execution
-depends on local MLX libraries plus a cached mapped base model.
+guaranteed, and model execution depends on local MLX libraries plus a cached
+mapped base model.
 
 ## Start localtinker
 
@@ -161,9 +161,9 @@ listing, model creation, futures, future cancellation, `forward`,
 `forward_backward`, `optim_step`, save/load weights,
 `load_state_with_optimizer`, sampler sessions, sampling, training run listing,
 checkpoint listing, archive URLs, publish/unpublish, TTL, and delete. Sampling
-returns generated-token logprobs and can return prompt logprobs. Unsupported
-hosted features return local user errors instead of silently falling back to the
-hosted service.
+returns generated-token logprobs, prompt logprobs, and top-k prompt logprobs.
+Unsupported hosted features return local user errors instead of silently
+falling back to the hosted service.
 
 See `docs/` for the local SDK reference and `docs/internal/conformance.md` for
 the current SDK coverage and hosted comparison checklist.
@@ -174,10 +174,11 @@ the current SDK coverage and hosted comparison checklist.
 go test ./...
 ```
 
-For a clean-checkout release gate, run without any local workspace overrides:
+For a clean-checkout release gate, run without any local workspace overrides
+and with an isolated build cache:
 
 ```sh
-GOWORK=off go test ./...
+GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./...
 ```
 
 Release builds are ordinary Go builds:
