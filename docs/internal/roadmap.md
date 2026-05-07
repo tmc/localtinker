@@ -125,8 +125,8 @@ Goal: keep training resume behavior compatible with hosted checkpoints.
 - Keep `load_state_with_optimizer` support.
 - Keep optimizer step counters.
 - Test train, save, load, resume, and continued loss decrease.
-- Document determinism inputs: seed, model, adapter config, optimizer, data
-  order, and MLX backend.
+- Determinism inputs (seed, model, adapter config, optimizer, data order,
+  MLX backend) are documented in `docs/determinism.md`.
 
 ## 6. Sampling
 
