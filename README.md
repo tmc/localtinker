@@ -190,6 +190,8 @@ GOOS=darwin GOWORK=off go build ./cmd/localtinker-tray
 ```
 
 The MLX runtime must be installed or `MLX_LIB_PATH` must point at a directory
-containing `libmlxc.dylib`. SDK smoke tests also need a Python environment with
-the Tinker SDK installed, and model runs need the mapped base model in the local
-Hugging Face or MLX cache.
+containing `libmlxc.dylib`. See [docs/mlx-setup.md](docs/mlx-setup.md) for the
+verified path on the development machine, the metallib caveat, and the exact
+clean-checkout test command. SDK smoke tests also need a Python environment
+with the Tinker SDK installed, and model runs need the mapped base model in the
+local Hugging Face or MLX cache.
