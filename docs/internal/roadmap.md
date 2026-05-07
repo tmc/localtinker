@@ -60,8 +60,8 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
   hosted-comparison gaps.
 - Cross-entropy accepts dense target tensors and returns per-token logprobs in
   local MLX tests.
-- Sampling returns generated token logprobs and prompt logprobs, and accepts
-  tokenizer-backed string stops.
+- Sampling returns generated token logprobs, prompt logprobs, and top-k prompt
+  logprobs, and accepts tokenizer-backed string stops.
 - Checkpoints include local optimizer state and archive metadata headers.
 
 ## 1. SDK Conformance
@@ -137,7 +137,7 @@ Goal: make sampling responses match hosted behavior where advertised.
 - Keep tokenizer-backed string stops covered.
 - Keep generated token logprobs covered.
 - Keep prompt logprobs covered.
-- Add top-k prompt logprobs only when implemented and advertised.
+- Keep top-k prompt logprobs covered while they remain advertised.
 - Add deterministic sampler tests over a small cached model.
 
 ## 7. Node Runtime
@@ -169,9 +169,9 @@ Goal: make local operation visible without tailing logs.
 
 Goal: keep the project buildable from a clean checkout.
 
-- Remove temporary relative `replace` directives once upstream `mlx-go`,
-  `mlx-go-lm`, and `modelir` module versions are consumable directly.
-- Keep `go test ./...` passing with `GOWORK=off`.
+- Keep `go test ./...` passing with `GOWORK=off` against the upstream
+  pseudo-versions of `mlx-go`, `mlx-go-lm`, and `modelir` (no `replace`
+  directives in `go.mod` as of 2026-05-07).
 - Add release build commands for coordinator, node, and tray.
 - Document model cache, Python SDK, and credential setup.
 - Avoid checking in binaries, generated caches, downloaded weights, or secrets.
@@ -192,10 +192,8 @@ Goal: keep local behavior honest against hosted Tinker.
 - Hosted scheduler timing and operation-level backpressure have not been
   compared.
 - Arbitrary non-prefix fractional weights are not fully supported.
-- Top-k prompt logprobs are not implemented.
 - Checkpoint archive URLs are local HTTP download URLs; hosted download and
   ownership enforcement remain incomplete.
-- The MLX dependency graph still needs temporary sibling-checkout replaces.
 - Hosted numerics and local MLX numerics will differ.
 
 ## Next Milestones
@@ -204,5 +202,5 @@ Goal: keep local behavior honest against hosted Tinker.
 2. Compare dense CE losses and logprobs against a hosted run.
 3. Add hosted-style checkpoint download ownership and retention enforcement.
 4. Compare local queue state and cancellation behavior against hosted futures.
-5. Remove temporary MLX/module replaces and document MLX library setup.
-6. Add top-k prompt logprobs.
+5. Document MLX library setup (`MLX_LIB_PATH`) for clean checkouts.
+6. Add deterministic sampler tests over a small cached model.
