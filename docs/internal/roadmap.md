@@ -203,4 +203,9 @@ Goal: keep local behavior honest against hosted Tinker.
 3. Add hosted-style checkpoint download ownership and retention enforcement.
 4. Compare local queue state and cancellation behavior against hosted futures.
 5. Document MLX library setup (`MLX_LIB_PATH`) for clean checkouts.
-6. Add deterministic sampler tests over a small cached model.
+6. Deterministic sampler tests over a small cached model: covered by
+   `TestSampleDeterministicSmallCachedModel`,
+   `TestSampleDeterministicRepeats`, and `TestSampleDeterministicPrefix`
+   in `internal/tinkertrain/sample_test.go`. They skip cleanly when
+   `LOCALTINKER_SMALL_MODEL` (default `mlx-community/Qwen3-0.6B-4bit`)
+   is not cached.
