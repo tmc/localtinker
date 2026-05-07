@@ -41,8 +41,8 @@ the commit being announced.
 | Gate | Command or artifact | Pass condition |
 | --- | --- | --- |
 | Clean tree | `git status --short` | No unrelated source, generated cache, model, binary, or secret changes. |
-| Unit and route coverage | `GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./...`; latest recorded pass: `5cf814b`. | All packages pass from a clean checkout with the intended module graph. |
-| Python SDK smoke | `GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./cmd/localtinker -run TestPythonSDKScript -count=1`; latest recorded pass: `5cf814b`. | All `cmd/localtinker/testdata/sdk_*.txt` scripts pass against a real Tinker SDK checkout. |
+| Unit and route coverage | `MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./...`; latest recorded pass: `c41c070`. | All packages pass from a clean checkout with the intended module graph. |
+| Python SDK smoke | `MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./cmd/localtinker -run TestPythonSDKScript -count=1`; latest recorded pass: `c41c070`. | All `cmd/localtinker/testdata/sdk_*.txt` scripts pass against a real Tinker SDK checkout. |
 | Local runner override | Manual flow below | A normal SDK job runs with only endpoint and credential environment overrides. |
 | Hosted comparison | JSONL artifact below | Hosted and local response keys, metric names, checkpoint metadata shape, and sampler output shapes are compared. |
 | Public caveats | Known Differences below | Every unsupported hosted feature is either not advertised or documented as a caveat. |
@@ -50,8 +50,14 @@ the commit being announced.
 Use isolated caches when running gates on a shared machine:
 
 ```
-GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./...
+MLX_LIB_PATH=/path/to/mlx/lib GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./...
 ```
+
+On this machine, the verified local MLX library directory is
+`/Users/tmc/ml-explore/mlx-go/mlxc/lib`. The
+`/Volumes/tmc/go/src/github.com/tmc/mlx-go-libs/dist/darwin-arm64` copy
+contains `mlx.metallib.gz`; it loads `libmlxc.dylib` but does not satisfy the
+default uncompressed metallib lookup used by the current tests.
 
 ## Local Runner Override Flow
 
@@ -162,26 +168,54 @@ limited public beta only if the caveats below are stated plainly.
 | Cross-entropy | Dense tensors, invalid weights, sparse tensor rejection, and logprobs are covered locally. `docs/internal/hosted-comparison/20260505-497eb1c-ce-hosted-local.jsonl` records matching hosted/local per-token logprob shapes and a forward loss mean difference. | Beta-ready with numeric caveats. |
 | Custom losses | `docs/internal/hosted-comparison/20260505-ecc480f-custom-loss-hosted-local.jsonl` records hosted and local `forward_backward_custom` success and `custom_loss:mean` metric shape evidence. | Beta-ready with numeric caveats. |
 | Sampling | Generated logprobs, prompt logprobs, deterministic seed flow, string stops, and top-k prompt logprob shapes are covered locally and in hosted comparison rows. | Beta-ready with numeric/distribution caveats. |
-| Packaging | Clean-checkout `GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./...`; latest recorded pass: `5cf814b`. | Beta-ready; rerun before any release commit. |
+| Packaging | Clean-checkout `MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./...`; latest recorded pass: `c41c070`. | Beta-ready; rerun before any release commit. |
 | Secrets and artifacts | Hosted comparison JSONL artifacts use scrubbed runner metadata (`python`, `local-runner`). No keys, binaries, downloaded weights, generated caches, or private model paths should be staged. | Beta-ready; keep scanning before release. |
 
 ## Known Differences
 
+Each bullet cites the JSONL row(s) that back it, or states that no hosted
+probe is on record. Evidence reviewed 2026-05-07.
+
 - Futures have local queue, running, cancellation, and result-byte accounting.
-  Hosted cancellation is not exposed by the generated SDK in the recorded probe,
-  the probed hosted cancel route returned 404, and hosted queue timing and
-  backpressure have not been compared.
+  Hosted cancellation is not exposed by the generated SDK and the probed
+  hosted cancel route returned 404. No hosted probe of cancellation or queue
+  backpressure is recorded in `docs/internal/hosted-comparison/`; the four
+  JSONL artifacts only record successful `forward`, `forward_backward`,
+  `optim_step`, `save_state`, `load_state_with_optimizer`, and
+  `forward_backward_custom` futures (see e.g. `20260505-951b2dc` rows 3–9 and
+  `20260505-a995c00` rows 3–9). Hosted scheduler timing and backpressure have
+  not been compared.
 - Checkpoint archive URLs are local HTTP download URLs, not hosted signed
-  download URLs.
-- Checkpoint ownership is recorded as `local`; hosted authorization behavior
-  has not been compared.
+  download URLs. Hosted rows record `scheme=https`, `has_query=true`,
+  `content_disposition_present=false`; local rows record `scheme=http`,
+  `content_disposition_present=true` and an extra `checkpoint.json` file
+  (`20260505-951b2dc` rows 11 and 23; `20260505-a995c00` rows 11 and 24).
+- Checkpoint ownership is recorded as `owner=null`, `public=false` on both
+  sides in the recorded archive_download events
+  (`20260505-951b2dc` rows 11/23, `20260505-a995c00` rows 11/24). No hosted
+  probe of authorization-failure or cross-owner access is recorded.
 - Dense cross-entropy per-token logprob shapes match the recorded hosted
-  comparison, but forward loss means differ.
+  comparison, but forward loss means differ. Paired evidence: shape `[4]` on
+  both sides and `absolute_difference=0.5989780426025391`
+  (`20260505-497eb1c` row 11, hosted source `computed_from_logprobs`,
+  local source `metrics.loss:mean`).
 - Sparse `TensorData` inputs are rejected; only dense tensor inputs are
-  supported.
+  supported. Local-only contract; no hosted probe recorded.
 - Multimodal model input chunks (`image` and `image_asset_pointer`) are
   rejected instead of being silently ignored; image tensor processing is not
-  implemented.
-- Optimizer state is stored in local checkpoints, but hosted resume parity has
-  not been recorded.
-- Hosted and local numeric results are not expected to match exactly.
+  implemented. Local-only contract; no hosted probe recorded.
+- Hosted optimizer-resume response shape is recorded
+  (`tinker_path_kind=weights`, `path_prefix_ok=true`,
+  `response_path_matches=true`, `optimizer_state=null` on both sides:
+  `20260505-951b2dc` rows 10/22, `20260505-a995c00` rows 10/23), but exact
+  optimizer internals and numeric continuation are not asserted as
+  equivalent. Hosted `optim_step` metrics arrive empty
+  (`20260505-951b2dc` row 7, `20260505-a995c00` row 7) while local emits
+  `loss:mean`, `optimizer_backend:mlx`, `optimizer_step:unique`
+  (`20260505-951b2dc` row 19, `20260505-a995c00` row 20).
+- Hosted and local numeric results are not expected to match exactly. The
+  CE forward loss mean differs by ~0.599 (`20260505-497eb1c` row 11) and the
+  sampler returns different generated tokens for the same seed/temperature/
+  top-p/top-k input — hosted `[15136, 1]` vs local `[4, 4]`
+  (`20260505-a995c00` rows 13 and 26). No systematic sampler-distribution
+  comparison is recorded.
