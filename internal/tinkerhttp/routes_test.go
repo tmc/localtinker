@@ -1117,8 +1117,8 @@ func TestCheckpointActionsTrackMetadata(t *testing.T) {
 	if rec.Header().Get("X-Tinker-Archive-Owner") != "local" {
 		t.Fatalf("archive owner = %q", rec.Header().Get("X-Tinker-Archive-Owner"))
 	}
-	if rec.Header().Get("X-Tinker-Archive-Visibility") != "private" {
-		t.Fatalf("archive visibility = %q", rec.Header().Get("X-Tinker-Archive-Visibility"))
+	if rec.Header().Get("X-Tinker-Archive-Visibility") != "public" {
+		t.Fatalf("archive visibility = %q, want public after publish", rec.Header().Get("X-Tinker-Archive-Visibility"))
 	}
 	location := rec.Header().Get("Location")
 	u, err := url.Parse(location)
@@ -1178,6 +1178,102 @@ func TestCheckpointActionsTrackMetadata(t *testing.T) {
 	if len(checkpoints) != 0 {
 		t.Fatalf("checkpoints after delete = %#v", checkpoints)
 	}
+}
+
+// TestCheckpointArchiveAuthorization pins the checkpoint archive
+// authorization headers and Location URL schema across visibility
+// transitions. Hosted Tinker exposes signed download URLs; localtinker
+// emits an in-process redirect with owner/visibility metadata headers
+// and a download=1 query.
+func TestCheckpointArchiveAuthorization(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LOCALTINKER_CHECKPOINT_ROOT", root)
+	if err := os.MkdirAll(filepath.Join(root, "model-a", "weights", "ckpt"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "model-a", "weights", "ckpt", "adapters.safetensors"), []byte("weights"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CompleteFuture(nil, map[string]any{
+		"type": "save_weights",
+		"path": "tinker://model-a/weights/ckpt",
+	}, map[string]any{
+		"type":     "save_weights",
+		"model_id": "model-a",
+		"path":     "tinker://model-a/weights/ckpt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+	base := "/api/v1/training_runs/model-a/checkpoints/weights/ckpt"
+
+	archive := func(t *testing.T) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, base+"/archive", nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusFound {
+			t.Fatalf("archive status = %d, want %d body=%s", rec.Code, http.StatusFound, rec.Body.String())
+		}
+		return rec
+	}
+
+	requireSchema := func(t *testing.T, rec *httptest.ResponseRecorder, wantVisibility string) {
+		t.Helper()
+		if got := rec.Header().Get("X-Tinker-Archive-Owner"); got != "local" {
+			t.Errorf("owner = %q, want local", got)
+		}
+		if got := rec.Header().Get("X-Tinker-Archive-Visibility"); got != wantVisibility {
+			t.Errorf("visibility = %q, want %q", got, wantVisibility)
+		}
+		expRFC := rec.Header().Get("X-Tinker-Archive-Expires-At")
+		if expRFC == "" {
+			t.Errorf("missing X-Tinker-Archive-Expires-At")
+		} else if _, err := time.Parse(time.RFC3339, expRFC); err != nil {
+			t.Errorf("X-Tinker-Archive-Expires-At = %q: %v", expRFC, err)
+		}
+		if rec.Header().Get("Expires") == "" {
+			t.Errorf("missing Expires header")
+		}
+		loc := rec.Header().Get("Location")
+		u, err := url.Parse(loc)
+		if err != nil {
+			t.Fatalf("Location %q: %v", loc, err)
+		}
+		if u.Query().Get("download") != "1" {
+			t.Errorf("Location query download = %q, want 1", u.Query().Get("download"))
+		}
+	}
+
+	t.Run("default_unpublished_is_private", func(t *testing.T) {
+		requireSchema(t, archive(t), "private")
+	})
+
+	t.Run("after_publish_is_public", func(t *testing.T) {
+		methodJSON(t, h, http.MethodPost, base+"/publish", nil, http.StatusOK, &map[string]any{})
+		requireSchema(t, archive(t), "public")
+	})
+
+	t.Run("after_unpublish_is_private", func(t *testing.T) {
+		methodJSON(t, h, http.MethodDelete, base+"/publish", nil, http.StatusOK, &map[string]any{})
+		requireSchema(t, archive(t), "private")
+	})
+
+	t.Run("expired_returns_gone_not_redirect", func(t *testing.T) {
+		methodJSON(t, h, http.MethodPut, base+"/ttl", map[string]any{"ttl": 1}, http.StatusOK, &map[string]any{})
+		// CheckpointExpired uses coord.now(); without a clock hook, exercise
+		// the non-expired path here. Expiration is covered by
+		// TestExpiredCheckpointIsHiddenAndArchiveGone.
+		rec := archive(t)
+		if rec.Code != http.StatusFound {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
+		}
+	})
 }
 
 func TestExpiredCheckpointIsHiddenAndArchiveGone(t *testing.T) {

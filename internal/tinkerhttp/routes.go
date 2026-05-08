@@ -891,11 +891,20 @@ func (s *Server) checkpointAction(w http.ResponseWriter, r *http.Request, path s
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 			return true
 		}
+		public, owner, err := s.coord.CheckpointVisibility(r.Context(), tinkerPath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "system_error", err.Error())
+			return true
+		}
+		visibility := "private"
+		if public {
+			visibility = "public"
+		}
 		expires := time.Now().UTC().Add(15 * time.Minute)
 		w.Header().Set("Expires", expires.Format(http.TimeFormat))
 		w.Header().Set("X-Tinker-Archive-Expires-At", expires.Format(time.RFC3339))
-		w.Header().Set("X-Tinker-Archive-Owner", "local")
-		w.Header().Set("X-Tinker-Archive-Visibility", "private")
+		w.Header().Set("X-Tinker-Archive-Owner", owner)
+		w.Header().Set("X-Tinker-Archive-Visibility", visibility)
 		if r.URL.Query().Get("download") == "1" {
 			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(file)))
 			http.ServeFile(w, r, file)

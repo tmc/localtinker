@@ -194,6 +194,13 @@ probe is on record. Evidence reviewed 2026-05-07.
   sides in the recorded archive_download events
   (`20260505-951b2dc` rows 11/23, `20260505-a995c00` rows 11/24). No hosted
   probe of authorization-failure or cross-owner access is recorded.
+  Local archive responses now reflect coordinator state on the
+  `X-Tinker-Archive-Owner` and `X-Tinker-Archive-Visibility` headers
+  (`private` by default, `public` after publish, back to `private` after
+  unpublish); pinned by
+  `internal/tinkerhttp.TestCheckpointArchiveAuthorization`. Hosted-style
+  signed URL emulation and cross-owner authorization remain intentionally
+  out of scope for the local coordinator.
 - Dense cross-entropy per-token logprob shapes match the recorded hosted
   comparison, but forward loss means differ. Paired evidence: shape `[4]` on
   both sides and `absolute_difference=0.5989780426025391`
