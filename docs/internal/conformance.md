@@ -41,8 +41,8 @@ the commit being announced.
 | Gate | Command or artifact | Pass condition |
 | --- | --- | --- |
 | Clean tree | `git status --short` | No unrelated source, generated cache, model, binary, or secret changes. |
-| Unit and route coverage | `MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./...`; latest recorded pass: `c41c070`. | All packages pass from a clean checkout with the intended module graph. |
-| Python SDK smoke | `MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./cmd/localtinker -run TestPythonSDKScript -count=1`; latest recorded pass: `c41c070`. | All `cmd/localtinker/testdata/sdk_*.txt` scripts pass against a real Tinker SDK checkout. |
+| Unit and route coverage | `MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./...`; latest recorded pass: `65f4c6e`. | All packages pass from a clean checkout with the intended module graph. |
+| Python SDK smoke | `MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./cmd/localtinker -run TestPythonSDKScript -count=1`; latest recorded pass: `65f4c6e`. | All `cmd/localtinker/testdata/sdk_*.txt` scripts pass against a real Tinker SDK checkout. |
 | Local runner override | Manual flow below | A normal SDK job runs with only endpoint and credential environment overrides. |
 | Hosted comparison | JSONL artifact below | Hosted and local response keys, metric names, checkpoint metadata shape, and sampler output shapes are compared. |
 | Public caveats | Known Differences below | Every unsupported hosted feature is either not advertised or documented as a caveat. |
@@ -168,7 +168,7 @@ limited public beta only if the caveats below are stated plainly.
 | Cross-entropy | Dense tensors, invalid weights, sparse tensor rejection, and logprobs are covered locally. `docs/internal/hosted-comparison/20260505-497eb1c-ce-hosted-local.jsonl` records matching hosted/local per-token logprob shapes and a forward loss mean difference. | Beta-ready with numeric caveats. |
 | Custom losses | `docs/internal/hosted-comparison/20260505-ecc480f-custom-loss-hosted-local.jsonl` records hosted and local `forward_backward_custom` success and `custom_loss:mean` metric shape evidence. | Beta-ready with numeric caveats. |
 | Sampling | Generated logprobs, prompt logprobs, deterministic seed flow, string stops, and top-k prompt logprob shapes are covered locally and in hosted comparison rows. | Beta-ready with numeric/distribution caveats. |
-| Packaging | Clean-checkout `MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./...`; latest recorded pass: `c41c070`. | Beta-ready; rerun before any release commit. |
+| Packaging | Clean-checkout `MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./...`; latest recorded pass: `65f4c6e`. | Beta-ready; rerun before any release commit. |
 | Secrets and artifacts | Hosted comparison JSONL artifacts use scrubbed runner metadata (`python`, `local-runner`). No keys, binaries, downloaded weights, generated caches, or private model paths should be staged. | Beta-ready; keep scanning before release. |
 
 ## Known Differences
