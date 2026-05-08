@@ -230,6 +230,115 @@ func TestDenseCrossEntropyReturnsWeightedLossAndLogprobs(t *testing.T) {
 	}
 }
 
+func TestDenseCrossEntropyFractionalWeights(t *testing.T) {
+	// Interleaved non-prefix fractional weights: zeros and fractions appear in
+	// the middle of the sequence, not as a leading mask. Locks the contract
+	// that training accepts arbitrary dense weights, not only zero-prefix
+	// followed by ones.
+	t.Run("batch accepts interleaved fractional weights", func(t *testing.T) {
+		input := ForwardBackwardInput{
+			LossFn: "cross_entropy",
+			Data: []Datum{{
+				ModelInput: ModelInput{Chunks: []ModelInputChunk{{
+					Type:   "encoded_text",
+					Tokens: []int{10, 11, 12, 13, 14, 15},
+				}}},
+				LossFnInputs: map[string]TensorData{
+					"target_tokens": {Data: []float64{20, 21, 22, 23, 24, 25}, DType: "int64"},
+					"weights":       {Data: []float64{1, 0, 0.3, 0, 0.7, 1}, DType: "float32"},
+				},
+			}},
+		}
+		batch, err := newDenseBatch(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := batch.weightSum, 3.0; !near(got, want) {
+			t.Fatalf("weightSum = %v, want %v", got, want)
+		}
+		if got, want := batch.rows[0].weights, []float32{1, 0, 0.3, 0, 0.7, 1}; !sameFloat32s(got, want) {
+			t.Fatalf("row weights = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("loss is weighted mean over arbitrary fractional weights", func(t *testing.T) {
+		// 1 batch, 4 sequence positions, 3-token vocab.
+		logits, err := mlx.FromSlice([]float32{
+			0, 1, 2,
+			2, 0, -2,
+			-1, 0, 1,
+			0, 2, 1,
+		}, []int{1, 4, 3}, mlx.Float32)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer logits.Free()
+		targets, err := mlx.FromSlice([]int32{2, 0, 1, 1}, []int{1, 4}, mlx.Int32)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer targets.Free()
+		// Non-prefix pattern: 0.25, 1, 0, 0.75 — zero in the middle, fractions
+		// at non-prefix positions.
+		weightVals := []float32{0.25, 1, 0, 0.75}
+		weights, err := mlx.FromSlice(weightVals, []int{1, 4}, mlx.Float32)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer weights.Free()
+
+		loss, logprobs, err := denseCrossEntropy(logits, targets, weights)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer loss.Free()
+		defer logprobs.Free()
+		if err := mlx.Eval(loss, logprobs); err != nil {
+			t.Fatal(err)
+		}
+		gotLoss, err := mlx.ItemAs[float32](loss)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		lp := []float64{
+			2 - logsumexp(0, 1, 2),
+			2 - logsumexp(2, 0, -2),
+			0 - logsumexp(-1, 0, 1),
+			2 - logsumexp(0, 2, 1),
+		}
+		var num, denom float64
+		for i, w := range weightVals {
+			num += float64(w) * (-lp[i])
+			denom += float64(w)
+		}
+		want := num / denom
+		if !near(float64(gotLoss), want) {
+			t.Fatalf("loss = %v, want %v", gotLoss, want)
+		}
+	})
+
+	t.Run("rejects sparse weights", func(t *testing.T) {
+		input := ForwardBackwardInput{
+			LossFn: "cross_entropy",
+			Data: []Datum{{
+				ModelInput: ModelInput{Chunks: []ModelInputChunk{{Tokens: []int{1, 2}}}},
+				LossFnInputs: map[string]TensorData{
+					"target_tokens": {Data: []float64{3, 4}, DType: "int64"},
+					"weights": {
+						Data:             []float64{0.5, 0.5},
+						DType:            "float32",
+						SparseCrowIndices: []int{0, 2},
+					},
+				},
+			}},
+		}
+		if _, err := newDenseBatch(input); err == nil {
+			t.Fatal("newDenseBatch succeeded with sparse weights, want error")
+		}
+	})
+}
+
 func TestDenseCrossEntropyShapeErrors(t *testing.T) {
 	logits, err := mlx.FromSlice([]float32{
 		0, 1, 2,
@@ -284,6 +393,18 @@ func TestDenseCrossEntropyShapeErrors(t *testing.T) {
 }
 
 func sameInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameFloat32s(a, b []float32) bool {
 	if len(a) != len(b) {
 		return false
 	}
