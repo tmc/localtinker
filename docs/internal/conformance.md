@@ -198,9 +198,11 @@ probe is on record. Evidence reviewed 2026-05-07.
   `X-Tinker-Archive-Owner` and `X-Tinker-Archive-Visibility` headers
   (`private` by default, `public` after publish, back to `private` after
   unpublish); pinned by
-  `internal/tinkerhttp.TestCheckpointArchiveAuthorization`. Hosted-style
-  signed URL emulation and cross-owner authorization remain intentionally
-  out of scope for the local coordinator.
+  `internal/tinkerhttp.TestCheckpointArchiveAuthorization` and recorded
+  in `docs/internal/hosted-comparison/20260508-e51c8f6-archive-visibility-local.jsonl`
+  (local-only; hosted side blocked on missing `TINKER_API_KEY`/`TINKER_BASE_URL`).
+  Hosted-style signed URL emulation and cross-owner authorization remain
+  intentionally out of scope for the local coordinator.
 - Dense cross-entropy per-token logprob shapes match the recorded hosted
   comparison, but forward loss means differ. Paired evidence: shape `[4]` on
   both sides and `absolute_difference=0.5989780426025391`
@@ -208,6 +210,15 @@ probe is on record. Evidence reviewed 2026-05-07.
   local source `metrics.loss:mean`).
 - Sparse `TensorData` inputs are rejected; only dense tensor inputs are
   supported. Local-only contract; no hosted probe recorded.
+- Arbitrary non-prefix fractional dense weights (e.g. `[0.25, 1, 0, 0.75]`
+  or `[1, 0, 0.3, 0, 0.7, 1]`) are accepted by `newDenseBatch` and
+  `denseCrossEntropy` returns the weighted mean
+  `(sum w_i * -logp_i) / sum w_i`. Pinned by
+  `internal/tinkertrain.TestDenseCrossEntropyFractionalWeights` and
+  recorded in
+  `docs/internal/hosted-comparison/20260508-e51c8f6-fractional-weights-local.jsonl`
+  (local-only; hosted side blocked on missing
+  `TINKER_API_KEY`/`TINKER_BASE_URL`).
 - Multimodal model input chunks (`image` and `image_asset_pointer`) are
   rejected instead of being silently ignored; image tensor processing is not
   implemented. Local-only contract; no hosted probe recorded.
