@@ -698,6 +698,20 @@ func (c *Coordinator) CheckpointExpired(ctx context.Context, path string) (bool,
 	return checkpointExpired(c.now(), checkpoint), nil
 }
 
+// CheckpointVisibility reports the published flag and owner string for path.
+// Unpublished checkpoints default to private/local.
+func (c *Coordinator) CheckpointVisibility(ctx context.Context, path string) (public bool, owner string, err error) {
+	checkpoint, err := c.checkpointMetadata(ctx, path)
+	if err != nil {
+		return false, "", err
+	}
+	owner = checkpoint.Owner
+	if owner == "" {
+		owner = "local"
+	}
+	return checkpoint.Public, owner, nil
+}
+
 func (c *Coordinator) checkpointMetadata(ctx context.Context, path string) (tinkerdb.Checkpoint, error) {
 	checkpoint, err := c.store.GetCheckpoint(ctx, path)
 	if err == nil {
