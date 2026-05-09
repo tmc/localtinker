@@ -220,8 +220,19 @@ probe is on record. Evidence reviewed 2026-05-07.
   (local-only; hosted side blocked on missing
   `TINKER_API_KEY`/`TINKER_BASE_URL`).
 - Multimodal model input chunks (`image` and `image_asset_pointer`) are
-  rejected instead of being silently ignored; image tensor processing is not
-  implemented. Local-only contract; no hosted probe recorded.
+  parsed and token-counted at the SDK boundary, then refused at the MLX
+  executor with a typed error that names the missing capability: `image`
+  chunks fail with "image chunks require a vision backend, which the local
+  MLX runtime does not provide"; `image_asset_pointer` chunks fail with
+  "image_asset_pointer chunks require a local image asset store, which is
+  not configured". `image.data` must begin with the PNG (`89 50 4E 47 …`)
+  or JPEG (`FF D8 FF`) magic prefix matching the declared `format`;
+  arbitrary nonempty bytes are rejected at parse. Pinned by
+  `internal/tinkertrain.TestImageChunkHeaderValidation`,
+  `TestMultimodalChunkParsesAndCounts`, `TestMultimodalExecutionRejected`,
+  and the HTTP forward-rejection table in
+  `internal/tinkerhttp.TestConformanceMalformedTrainingInputsReturnUserErrors`.
+  Local-only contract; no hosted probe recorded.
 - Hosted optimizer-resume response shape is recorded
   (`tinker_path_kind=weights`, `path_prefix_ok=true`,
   `response_path_matches=true`, `optimizer_state=null` on both sides:

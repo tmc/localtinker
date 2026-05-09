@@ -158,7 +158,7 @@ func TestModelInputTokensRejects(t *testing.T) {
 		{
 			name: "well-formed image chunk parses",
 			input: ModelInput{Chunks: []ModelInputChunk{{
-				Type: "image", Format: "png", Data: []byte("fake"), ExpectedTokens: &four,
+				Type: "image", Format: "png", Data: validPNG, ExpectedTokens: &four,
 			}}},
 			wantErr: "",
 		},
