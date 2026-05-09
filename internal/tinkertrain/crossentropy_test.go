@@ -117,9 +117,17 @@ func TestDenseCrossEntropyBatchRejectsBadTargetsAndWeights(t *testing.T) {
 			},
 		},
 		{
-			name: "image chunk",
+			// Well-formed image chunk: parse layer accepts it, but the MLX
+			// executor refuses multimodal at the boundary.
+			name: "well formed image chunk refused at executor",
 			edit: func(in *ForwardBackwardInput) {
-				in.Data[0].ModelInput.Chunks = []ModelInputChunk{{Type: "image", Tokens: []int{1, 2}}}
+				two := 2
+				in.Data[0].ModelInput.Chunks = []ModelInputChunk{{
+					Type:           "image",
+					Format:         "png",
+					Data:           []byte("fake"),
+					ExpectedTokens: &two,
+				}}
 			},
 			wantErr: true,
 		},
@@ -326,8 +334,8 @@ func TestDenseCrossEntropyFractionalWeights(t *testing.T) {
 				LossFnInputs: map[string]TensorData{
 					"target_tokens": {Data: []float64{3, 4}, DType: "int64"},
 					"weights": {
-						Data:             []float64{0.5, 0.5},
-						DType:            "float32",
+						Data:              []float64{0.5, 0.5},
+						DType:             "float32",
 						SparseCrowIndices: []int{0, 2},
 					},
 				},

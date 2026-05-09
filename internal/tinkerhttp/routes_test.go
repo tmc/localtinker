@@ -826,15 +826,17 @@ func TestConformanceMalformedTrainingInputsReturnUserErrors(t *testing.T) {
 			want: "input tokens length 4 does not match target_tokens length 3",
 		},
 		{
-			name: "image chunk",
+			// Image chunk missing required fields (format/expected_tokens/data)
+			// is rejected at the parse layer.
+			name: "image chunk missing fields",
 			edit: func(d map[string]any) {
 				d["model_input"] = map[string]any{
 					"chunks": []any{
-						map[string]any{"type": "image", "tokens": []int{1, 1, 1, 1}},
+						map[string]any{"type": "image"},
 					},
 				}
 			},
-			want: `unsupported model input chunk type "image"`,
+			want: `image chunk: format "", want png or jpeg`,
 		},
 		{
 			name: "sparse weights",
@@ -848,15 +850,21 @@ func TestConformanceMalformedTrainingInputsReturnUserErrors(t *testing.T) {
 			want: "sparse tensors are not supported",
 		},
 		{
-			name: "image asset pointer chunk",
+			// image_asset_pointer with format but missing location/expected_tokens
+			// is rejected at the parse layer.
+			name: "image_asset_pointer missing location",
 			edit: func(d map[string]any) {
 				d["model_input"] = map[string]any{
 					"chunks": []any{
-						map[string]any{"type": "image_asset_pointer", "tokens": []int{1, 1, 1, 1}},
+						map[string]any{
+							"type":            "image_asset_pointer",
+							"format":          "png",
+							"expected_tokens": 4,
+						},
 					},
 				}
 			},
-			want: `unsupported model input chunk type "image_asset_pointer"`,
+			want: "image_asset_pointer chunk: location is required",
 		},
 		{
 			name: "invalid target category",
@@ -1012,14 +1020,17 @@ func TestConformanceMalformedAsyncRequestsReturnBadRequest(t *testing.T) {
 			want: "prompt is empty",
 		},
 		{
-			name: "image prompt",
+			// Bare image_asset_pointer with no fields fails parse-layer
+			// validation. Well-formed multimodal prompts pass this layer
+			// and are refused at the MLX executor (covered separately).
+			name: "image prompt missing fields",
 			req: map[string]any{
 				"sampling_session_id": "sample-a",
 				"num_samples":         1,
 				"prompt":              map[string]any{"chunks": []any{map[string]any{"type": "image_asset_pointer"}}},
 				"sampling_params":     map[string]any{"max_tokens": 1},
 			},
-			want: `unsupported model input chunk type "image_asset_pointer"`,
+			want: `image_asset_pointer chunk: format "", want png or jpeg`,
 		},
 	}
 	for _, tt := range tests {
