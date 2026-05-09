@@ -301,6 +301,9 @@ func (m *mlxModel) sample(ctx context.Context, req SampleRequest) (SampleOutput,
 	if numSamples <= 0 {
 		numSamples = 1
 	}
+	if req.Prompt.hasMultimodalChunks() {
+		return SampleOutput{}, fmt.Errorf("sample: multimodal chunks not supported by local MLX backend")
+	}
 	prompt, err := req.Prompt.tokens()
 	if err != nil {
 		return SampleOutput{}, fmt.Errorf("sample prompt: %w", err)
@@ -585,6 +588,9 @@ func newDenseBatch(input ForwardBackwardInput) (denseBatch, error) {
 	var batch denseBatch
 	batch.rows = make([]denseRow, 0, len(input.Data))
 	for i, datum := range input.Data {
+		if datum.ModelInput.hasMultimodalChunks() {
+			return denseBatch{}, fmt.Errorf("datum %d: multimodal chunks not supported by local MLX backend", i)
+		}
 		tokens, err := datum.ModelInput.tokens()
 		if err != nil {
 			return denseBatch{}, fmt.Errorf("datum %d: %w", i, err)

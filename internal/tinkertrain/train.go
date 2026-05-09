@@ -43,8 +43,12 @@ type ModelInput struct {
 }
 
 type ModelInputChunk struct {
-	Type   string `json:"type"`
-	Tokens []int  `json:"tokens"`
+	Type           string `json:"type"`
+	Tokens         []int  `json:"tokens,omitempty"`
+	Format         string `json:"format,omitempty"`
+	Data           []byte `json:"data,omitempty"`
+	Location       string `json:"location,omitempty"`
+	ExpectedTokens *int   `json:"expected_tokens,omitempty"`
 }
 
 type TensorData struct {
@@ -331,6 +335,10 @@ func (d Datum) weights(n int) ([]float64, error) {
 	return append([]float64(nil), weight.Data...), nil
 }
 
+// tokens returns the token sequence implied by m. Image chunks contribute
+// expected_tokens placeholder slots (zero ids) so the SDK contract — well-formed
+// multimodal requests are accepted at the parse layer — holds. Multimodal
+// execution is refused at the MLX boundary (see hasMultimodalChunks).
 func (m ModelInput) tokens() ([]int, error) {
 	var out []int
 	for _, chunk := range m.Chunks {
@@ -338,10 +346,51 @@ func (m ModelInput) tokens() ([]int, error) {
 		case "", "encoded_text":
 			out = append(out, chunk.Tokens...)
 		case "image", "image_asset_pointer":
-			return nil, fmt.Errorf("unsupported model input chunk type %q", chunk.Type)
+			if err := validateImageChunk(chunk); err != nil {
+				return nil, err
+			}
+			n := *chunk.ExpectedTokens
+			out = append(out, make([]int, n)...)
 		default:
 			return nil, fmt.Errorf("unknown model input chunk type %q", chunk.Type)
 		}
 	}
 	return out, nil
+}
+
+// hasMultimodalChunks reports whether m contains any image or
+// image_asset_pointer chunk. Local MLX execution refuses these even though
+// the parse and token-counting layers accept them.
+func (m ModelInput) hasMultimodalChunks() bool {
+	for _, chunk := range m.Chunks {
+		if chunk.Type == "image" || chunk.Type == "image_asset_pointer" {
+			return true
+		}
+	}
+	return false
+}
+
+func validateImageChunk(c ModelInputChunk) error {
+	switch c.Format {
+	case "png", "jpeg":
+	default:
+		return fmt.Errorf("%s chunk: format %q, want png or jpeg", c.Type, c.Format)
+	}
+	if c.ExpectedTokens == nil {
+		return fmt.Errorf("%s chunk: expected_tokens is required", c.Type)
+	}
+	if *c.ExpectedTokens <= 0 {
+		return fmt.Errorf("%s chunk: expected_tokens = %d, want positive", c.Type, *c.ExpectedTokens)
+	}
+	switch c.Type {
+	case "image":
+		if len(c.Data) == 0 {
+			return fmt.Errorf("image chunk: data is required")
+		}
+	case "image_asset_pointer":
+		if c.Location == "" {
+			return fmt.Errorf("image_asset_pointer chunk: location is required")
+		}
+	}
+	return nil
 }

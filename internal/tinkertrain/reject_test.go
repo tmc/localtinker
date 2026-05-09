@@ -98,20 +98,47 @@ func TestDatumWeightsRejects(t *testing.T) {
 }
 
 func TestModelInputTokensRejects(t *testing.T) {
+	four := 4
+	zero := 0
 	tests := []struct {
 		name    string
 		input   ModelInput
 		wantErr string
 	}{
 		{
-			name:    "image chunk",
-			input:   ModelInput{Chunks: []ModelInputChunk{{Type: "image", Tokens: []int{1, 2}}}},
-			wantErr: `unsupported model input chunk type "image"`,
+			name: "image chunk missing format",
+			input: ModelInput{Chunks: []ModelInputChunk{{
+				Type: "image", Data: []byte("not-empty"), ExpectedTokens: &four,
+			}}},
+			wantErr: `image chunk: format "", want png or jpeg`,
 		},
 		{
-			name:    "image_asset_pointer chunk",
-			input:   ModelInput{Chunks: []ModelInputChunk{{Type: "image_asset_pointer", Tokens: []int{1, 2}}}},
-			wantErr: `unsupported model input chunk type "image_asset_pointer"`,
+			name: "image chunk missing expected_tokens",
+			input: ModelInput{Chunks: []ModelInputChunk{{
+				Type: "image", Format: "png", Data: []byte("x"),
+			}}},
+			wantErr: "image chunk: expected_tokens is required",
+		},
+		{
+			name: "image chunk non-positive expected_tokens",
+			input: ModelInput{Chunks: []ModelInputChunk{{
+				Type: "image", Format: "png", Data: []byte("x"), ExpectedTokens: &zero,
+			}}},
+			wantErr: "expected_tokens = 0, want positive",
+		},
+		{
+			name: "image chunk missing data",
+			input: ModelInput{Chunks: []ModelInputChunk{{
+				Type: "image", Format: "png", ExpectedTokens: &four,
+			}}},
+			wantErr: "image chunk: data is required",
+		},
+		{
+			name: "image_asset_pointer missing location",
+			input: ModelInput{Chunks: []ModelInputChunk{{
+				Type: "image_asset_pointer", Format: "jpeg", ExpectedTokens: &four,
+			}}},
+			wantErr: "image_asset_pointer chunk: location is required",
 		},
 		{
 			name:    "encoded_text chunk succeeds",
@@ -127,6 +154,21 @@ func TestModelInputTokensRejects(t *testing.T) {
 			name:    "typo'd chunk type rejected",
 			input:   ModelInput{Chunks: []ModelInputChunk{{Type: "encoded_txt", Tokens: []int{1, 2}}}},
 			wantErr: `unknown model input chunk type "encoded_txt"`,
+		},
+		{
+			name: "well-formed image chunk parses",
+			input: ModelInput{Chunks: []ModelInputChunk{{
+				Type: "image", Format: "png", Data: []byte("fake"), ExpectedTokens: &four,
+			}}},
+			wantErr: "",
+		},
+		{
+			name: "well-formed image_asset_pointer parses",
+			input: ModelInput{Chunks: []ModelInputChunk{{
+				Type: "image_asset_pointer", Format: "jpeg", Location: "tinker://asset/x",
+				ExpectedTokens: &four,
+			}}},
+			wantErr: "",
 		},
 	}
 	for _, tt := range tests {
