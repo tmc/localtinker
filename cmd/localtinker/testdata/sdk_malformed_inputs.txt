@@ -43,13 +43,32 @@ try:
     unsupported["loss_fn_inputs"]["mask"] = {"data": [1, 1, 1, 1], "dtype": "float32"}
     expect_user_error("unsupported_loss_input", unsupported, 'unsupported loss_fn_inputs key "mask"')
 
-    sparse = valid_datum()
-    sparse["loss_fn_inputs"]["target_tokens"] = {
+    sparse_missing_col = valid_datum()
+    sparse_missing_col["loss_fn_inputs"]["target_tokens"] = {
         "data": [1, 1, 1, 1],
         "dtype": "int64",
         "sparse_crow_indices": [0, 1],
     }
-    expect_user_error("sparse_tensor", sparse, "sparse tensors are not supported")
+    expect_user_error(
+        "sparse_missing_col",
+        sparse_missing_col,
+        "sparse tensor requires both sparse_crow_indices and sparse_col_indices",
+    )
+
+    sparse_bad_shape = valid_datum()
+    # 1-D shape with sparse fields: rejected because CSR requires 2-D shape.
+    sparse_bad_shape["loss_fn_inputs"]["target_tokens"] = {
+        "data": [1],
+        "dtype": "int64",
+        "shape": [4],
+        "sparse_crow_indices": [0, 1],
+        "sparse_col_indices": [0],
+    }
+    expect_user_error(
+        "sparse_bad_shape",
+        sparse_bad_shape,
+        "sparse tensor requires 2-D shape",
+    )
 
     bad_shape = valid_datum()
     bad_shape["loss_fn_inputs"]["target_tokens"] = {

@@ -784,7 +784,7 @@ func TestConformanceMalformedTrainingInputsReturnUserErrors(t *testing.T) {
 			want: `unsupported loss_fn_inputs key "mask"`,
 		},
 		{
-			name: "sparse tensor",
+			name: "sparse target_tokens missing col indices",
 			edit: func(d map[string]any) {
 				d["loss_fn_inputs"].(map[string]any)["target_tokens"] = map[string]any{
 					"data":                []int{1, 1, 1, 1},
@@ -792,7 +792,7 @@ func TestConformanceMalformedTrainingInputsReturnUserErrors(t *testing.T) {
 					"sparse_crow_indices": []int{0, 1},
 				}
 			},
-			want: "sparse tensors are not supported",
+			want: "sparse tensor requires both sparse_crow_indices and sparse_col_indices",
 		},
 		{
 			name: "bad dtype",
@@ -839,7 +839,7 @@ func TestConformanceMalformedTrainingInputsReturnUserErrors(t *testing.T) {
 			want: `image chunk: format "", want png or jpeg`,
 		},
 		{
-			name: "sparse weights",
+			name: "sparse weights missing col indices",
 			edit: func(d map[string]any) {
 				d["loss_fn_inputs"].(map[string]any)["weights"] = map[string]any{
 					"data":                []float64{1, 1, 1, 1},
@@ -847,7 +847,7 @@ func TestConformanceMalformedTrainingInputsReturnUserErrors(t *testing.T) {
 					"sparse_crow_indices": []int{0, 1},
 				}
 			},
-			want: "sparse tensors are not supported",
+			want: "sparse tensor requires both sparse_crow_indices and sparse_col_indices",
 		},
 		{
 			// image_asset_pointer with format but missing location/expected_tokens
