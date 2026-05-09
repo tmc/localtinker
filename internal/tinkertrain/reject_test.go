@@ -118,6 +118,16 @@ func TestModelInputTokensRejects(t *testing.T) {
 			input:   ModelInput{Chunks: []ModelInputChunk{{Type: "encoded_text", Tokens: []int{1, 2, 3}}}},
 			wantErr: "",
 		},
+		{
+			name:    "unknown chunk type",
+			input:   ModelInput{Chunks: []ModelInputChunk{{Type: "audio", Tokens: []int{1, 2}}}},
+			wantErr: `unknown model input chunk type "audio"`,
+		},
+		{
+			name:    "typo'd chunk type rejected",
+			input:   ModelInput{Chunks: []ModelInputChunk{{Type: "encoded_txt", Tokens: []int{1, 2}}}},
+			wantErr: `unknown model input chunk type "encoded_txt"`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -671,6 +671,8 @@ func tokenCount(input tinkertrain.ModelInput) (int, error) {
 			n += len(chunk.Tokens)
 		case "image", "image_asset_pointer":
 			return 0, fmt.Errorf("unsupported model input chunk type %q", chunk.Type)
+		default:
+			return 0, fmt.Errorf("unknown model input chunk type %q", chunk.Type)
 		}
 	}
 	return n, nil
