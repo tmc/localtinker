@@ -736,7 +736,7 @@ func tokenCount(input tinkertrain.ModelInput) (int, error) {
 		case "", "encoded_text":
 			n += len(chunk.Tokens)
 		case "image", "image_asset_pointer":
-			if err := validateImageChunk(chunk); err != nil {
+			if err := tinkertrain.ValidateImageChunk(chunk); err != nil {
 				return 0, err
 			}
 			n += *chunk.ExpectedTokens
@@ -745,31 +745,6 @@ func tokenCount(input tinkertrain.ModelInput) (int, error) {
 		}
 	}
 	return n, nil
-}
-
-func validateImageChunk(c tinkertrain.ModelInputChunk) error {
-	switch c.Format {
-	case "png", "jpeg":
-	default:
-		return fmt.Errorf("%s chunk: format %q, want png or jpeg", c.Type, c.Format)
-	}
-	if c.ExpectedTokens == nil {
-		return fmt.Errorf("%s chunk: expected_tokens is required", c.Type)
-	}
-	if *c.ExpectedTokens <= 0 {
-		return fmt.Errorf("%s chunk: expected_tokens = %d, want positive", c.Type, *c.ExpectedTokens)
-	}
-	switch c.Type {
-	case "image":
-		if len(c.Data) == 0 {
-			return fmt.Errorf("image chunk: data is required")
-		}
-	case "image_asset_pointer":
-		if c.Location == "" {
-			return fmt.Errorf("image_asset_pointer chunk: location is required")
-		}
-	}
-	return nil
 }
 
 func validateSampleRequest(req tinkertrain.SampleRequest) error {

@@ -125,7 +125,7 @@ func TestDenseCrossEntropyBatchRejectsBadTargetsAndWeights(t *testing.T) {
 				in.Data[0].ModelInput.Chunks = []ModelInputChunk{{
 					Type:           "image",
 					Format:         "png",
-					Data:           []byte("fake"),
+					Data:           validPNG,
 					ExpectedTokens: &two,
 				}}
 			},

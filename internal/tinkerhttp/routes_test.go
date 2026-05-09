@@ -839,6 +839,25 @@ func TestConformanceMalformedTrainingInputsReturnUserErrors(t *testing.T) {
 			want: `image chunk: format "", want png or jpeg`,
 		},
 		{
+			// Image chunk with declared format png but bytes that do not
+			// begin with the PNG magic prefix is rejected at the parse
+			// layer. base64 of "not-an-image" is "bm90LWFuLWltYWdl".
+			name: "image chunk header mismatch",
+			edit: func(d map[string]any) {
+				d["model_input"] = map[string]any{
+					"chunks": []any{
+						map[string]any{
+							"type":            "image",
+							"format":          "png",
+							"data":            "bm90LWFuLWltYWdl",
+							"expected_tokens": 4,
+						},
+					},
+				}
+			},
+			want: "data does not start with PNG magic bytes",
+		},
+		{
 			name: "sparse weights missing col indices",
 			edit: func(d map[string]any) {
 				d["loss_fn_inputs"].(map[string]any)["weights"] = map[string]any{

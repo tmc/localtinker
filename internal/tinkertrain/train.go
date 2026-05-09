@@ -2,6 +2,7 @@
 package tinkertrain
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -346,7 +347,7 @@ func (m ModelInput) tokens() ([]int, error) {
 		case "", "encoded_text":
 			out = append(out, chunk.Tokens...)
 		case "image", "image_asset_pointer":
-			if err := validateImageChunk(chunk); err != nil {
+			if err := ValidateImageChunk(chunk); err != nil {
 				return nil, err
 			}
 			n := *chunk.ExpectedTokens
@@ -362,15 +363,31 @@ func (m ModelInput) tokens() ([]int, error) {
 // image_asset_pointer chunk. Local MLX execution refuses these even though
 // the parse and token-counting layers accept them.
 func (m ModelInput) hasMultimodalChunks() bool {
-	for _, chunk := range m.Chunks {
-		if chunk.Type == "image" || chunk.Type == "image_asset_pointer" {
-			return true
-		}
-	}
-	return false
+	return m.multimodalRefusal() != nil
 }
 
-func validateImageChunk(c ModelInputChunk) error {
+// multimodalRefusal returns a typed boundary error describing why local
+// execution cannot consume m, or nil if m has no multimodal chunks. The
+// error names the boundary explicitly so callers (and tests) can tell
+// "no vision backend" apart from "no image asset store".
+func (m ModelInput) multimodalRefusal() error {
+	for _, chunk := range m.Chunks {
+		switch chunk.Type {
+		case "image":
+			return fmt.Errorf("image chunks require a vision backend, which the local MLX runtime does not provide")
+		case "image_asset_pointer":
+			return fmt.Errorf("image_asset_pointer chunks require a local image asset store, which is not configured")
+		}
+	}
+	return nil
+}
+
+// ValidateImageChunk reports whether c is a well-formed image or
+// image_asset_pointer chunk per the SDK contract. Format must be png or
+// jpeg, ExpectedTokens must be set and positive, and image bytes must
+// begin with the matching magic bytes. Local execution refuses any
+// multimodal chunk regardless of validity (see hasMultimodalChunks).
+func ValidateImageChunk(c ModelInputChunk) error {
 	switch c.Format {
 	case "png", "jpeg":
 	default:
@@ -387,9 +404,34 @@ func validateImageChunk(c ModelInputChunk) error {
 		if len(c.Data) == 0 {
 			return fmt.Errorf("image chunk: data is required")
 		}
+		if err := checkImageMagic(c.Format, c.Data); err != nil {
+			return fmt.Errorf("image chunk: %w", err)
+		}
 	case "image_asset_pointer":
 		if c.Location == "" {
 			return fmt.Errorf("image_asset_pointer chunk: location is required")
+		}
+	}
+	return nil
+}
+
+// pngMagic and jpegMagic are the leading bytes of a PNG or JPEG file. We
+// check only the magic prefix; full image decoding is left to a vision
+// backend, which the local MLX runtime does not provide.
+var (
+	pngMagic  = []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
+	jpegMagic = []byte{0xFF, 0xD8, 0xFF}
+)
+
+func checkImageMagic(format string, data []byte) error {
+	switch format {
+	case "png":
+		if len(data) < len(pngMagic) || !bytes.Equal(data[:len(pngMagic)], pngMagic) {
+			return fmt.Errorf("data does not start with PNG magic bytes")
+		}
+	case "jpeg":
+		if len(data) < len(jpegMagic) || !bytes.Equal(data[:len(jpegMagic)], jpegMagic) {
+			return fmt.Errorf("data does not start with JPEG magic bytes")
 		}
 	}
 	return nil
