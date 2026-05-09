@@ -884,6 +884,27 @@ func TestConformanceMalformedTrainingInputsReturnUserErrors(t *testing.T) {
 			},
 			want: "weights shape [1 4] does not match target_tokens shape [2 2]",
 		},
+		{
+			name: "unknown chunk type",
+			edit: func(d map[string]any) {
+				d["model_input"] = map[string]any{
+					"chunks": []any{
+						map[string]any{"type": "audio", "tokens": []int{1, 1, 1, 1}},
+					},
+				}
+			},
+			want: `unknown model input chunk type "audio"`,
+		},
+		{
+			name: "weights dtype int64 rejected by per-name guard",
+			edit: func(d map[string]any) {
+				d["loss_fn_inputs"].(map[string]any)["weights"] = map[string]any{
+					"data":  []float64{1, 1, 1, 1},
+					"dtype": "int64",
+				}
+			},
+			want: `dtype "int64", want float32`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

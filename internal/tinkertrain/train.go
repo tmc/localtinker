@@ -339,6 +339,8 @@ func (m ModelInput) tokens() ([]int, error) {
 			out = append(out, chunk.Tokens...)
 		case "image", "image_asset_pointer":
 			return nil, fmt.Errorf("unsupported model input chunk type %q", chunk.Type)
+		default:
+			return nil, fmt.Errorf("unknown model input chunk type %q", chunk.Type)
 		}
 	}
 	return out, nil
