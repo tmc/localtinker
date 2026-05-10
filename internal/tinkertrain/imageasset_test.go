@@ -110,18 +110,18 @@ func TestResolveImageAssetPointerRejectsWrongChunkType(t *testing.T) {
 // installs a replacement (and nil restores the default).
 func TestManagerImageAssetResolverDefaultsAndOverrides(t *testing.T) {
 	m := &Manager{}
-	if _, ok := m.imageAssetResolver().(DefaultImageAssetResolver); !ok {
-		t.Fatalf("fresh Manager resolver = %T, want DefaultImageAssetResolver", m.imageAssetResolver())
+	if _, ok := m.ImageAssetResolver().(DefaultImageAssetResolver); !ok {
+		t.Fatalf("fresh Manager resolver = %T, want DefaultImageAssetResolver", m.ImageAssetResolver())
 	}
 	r := NewMapImageAssetResolver()
 	m.SetImageAssetResolver(r)
-	if got := m.imageAssetResolver(); got != r {
+	if got := m.ImageAssetResolver(); got != r {
 		t.Fatalf("after SetImageAssetResolver, resolver = %v, want installed instance", got)
 	}
 	m.SetImageAssetResolver(nil)
-	if _, ok := m.imageAssetResolver().(DefaultImageAssetResolver); !ok {
+	if _, ok := m.ImageAssetResolver().(DefaultImageAssetResolver); !ok {
 		t.Fatalf("after SetImageAssetResolver(nil), resolver = %T, want DefaultImageAssetResolver",
-			m.imageAssetResolver())
+			m.ImageAssetResolver())
 	}
 }
 
