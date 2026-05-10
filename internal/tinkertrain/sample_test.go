@@ -23,8 +23,6 @@ func TestStopTokenSequencesScalarInteger(t *testing.T) {
 		{name: "int", in: 42, want: [][]int{{42}}},
 		{name: "json number", in: json.Number("42"), want: [][]int{{42}}},
 		{name: "float64 integer", in: float64(42), want: [][]int{{42}}},
-		{name: "float64 fraction", in: 42.5, want: nil},
-		{name: "negative", in: -1, want: nil},
 		{name: "sequence", in: []int{1, 2}, want: [][]int{{1, 2}}},
 		{name: "sequences", in: [][]int{{1}, {2, 3}}, want: [][]int{{1}, {2, 3}}},
 	}
@@ -36,6 +34,31 @@ func TestStopTokenSequencesScalarInteger(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("stopTokenSequences(%v) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStopTokenSequencesRejects(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      any
+		wantErr string
+	}{
+		{name: "fractional float", in: 42.5, wantErr: "unsupported"},
+		{name: "negative scalar", in: -1, wantErr: "unsupported"},
+		{name: "negative in []int", in: []int{1, -2}, wantErr: "negative"},
+		{name: "negative in [][]int", in: [][]int{{1}, {-2}}, wantErr: "negative"},
+		{name: "object", in: map[string]any{"text": "stop"}, wantErr: "unsupported"},
+		{name: "nested any int with fraction", in: []any{1.5, 2}, wantErr: "not an integer"},
+		{name: "nested negative", in: []any{-1, 2}, wantErr: "negative"},
+		{name: "deeply nested", in: []any{[]any{[]any{1}}}, wantErr: "unsupported"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := stopTokenSequences(tt.in, nil)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("stopTokenSequences(%v) error = %v, want substring %q", tt.in, err, tt.wantErr)
 			}
 		})
 	}

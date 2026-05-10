@@ -704,7 +704,164 @@ func validateSampleRequest(req tinkertrain.SampleRequest) error {
 	if req.TopKPromptLogprobs < 0 {
 		return errors.New("topk_prompt_logprobs is negative")
 	}
+	if err := validateStopShape(req.SamplingParams.Stop); err != nil {
+		return fmt.Errorf("sampling_params.stop: %w", err)
+	}
 	return nil
+}
+
+// validateStopShape rejects SamplingParams.Stop values whose shape is outside
+// the SDK contract before they reach MLX. Accepted shapes:
+//   - nil
+//   - string
+//   - non-negative integer scalar (token id)
+//   - []string or []any of strings
+//   - []int / []any of non-negative integers (a single token sequence)
+//   - [][]int / []any of non-negative integer sequences (list of stop sequences)
+//
+// Object shapes, fractional numbers, negative tokens, and mixed-type lists are
+// rejected with explicit user errors.
+func validateStopShape(v any) error {
+	if v == nil {
+		return nil
+	}
+	switch v := v.(type) {
+	case string:
+		return nil
+	case []string:
+		for i, s := range v {
+			if s == "" {
+				return fmt.Errorf("stop[%d] is an empty string", i)
+			}
+		}
+		return nil
+	case int, int32, int64, float32, float64, json.Number:
+		return validateScalarStop(v)
+	case []int:
+		return validateIntStopSeq(v)
+	case [][]int:
+		for i, seq := range v {
+			if err := validateIntStopSeq(seq); err != nil {
+				return fmt.Errorf("stop[%d]: %w", i, err)
+			}
+		}
+		return nil
+	case []any:
+		return validateAnyStopList(v)
+	case map[string]any:
+		return errors.New("object stop value is not supported")
+	}
+	return fmt.Errorf("unsupported stop value of type %T", v)
+}
+
+func validateScalarStop(v any) error {
+	switch v := v.(type) {
+	case int:
+		if v < 0 {
+			return fmt.Errorf("scalar stop token %d is negative", v)
+		}
+		return nil
+	case int32:
+		if v < 0 {
+			return fmt.Errorf("scalar stop token %d is negative", v)
+		}
+		return nil
+	case int64:
+		if v < 0 {
+			return fmt.Errorf("scalar stop token %d is negative", v)
+		}
+		return nil
+	case float32:
+		if float32(int64(v)) != v {
+			return fmt.Errorf("scalar stop token %v is not an integer", v)
+		}
+		if v < 0 {
+			return fmt.Errorf("scalar stop token %v is negative", v)
+		}
+		return nil
+	case float64:
+		if float64(int64(v)) != v {
+			return fmt.Errorf("scalar stop token %v is not an integer", v)
+		}
+		if v < 0 {
+			return fmt.Errorf("scalar stop token %v is negative", v)
+		}
+		return nil
+	case json.Number:
+		n, err := v.Int64()
+		if err != nil {
+			return fmt.Errorf("scalar stop token %s is not an integer", v.String())
+		}
+		if n < 0 {
+			return fmt.Errorf("scalar stop token %d is negative", n)
+		}
+		return nil
+	}
+	return fmt.Errorf("unsupported scalar stop type %T", v)
+}
+
+func validateIntStopSeq(seq []int) error {
+	for j, t := range seq {
+		if t < 0 {
+			return fmt.Errorf("token[%d] = %d is negative", j, t)
+		}
+	}
+	return nil
+}
+
+func validateAnyStopList(list []any) error {
+	if len(list) == 0 {
+		return nil
+	}
+	// Determine homogeneous mode from the first element: strings or token sequences.
+	first := list[0]
+	switch first.(type) {
+	case string:
+		for i, e := range list {
+			s, ok := e.(string)
+			if !ok {
+				return fmt.Errorf("stop[%d] mixes string with %T", i, e)
+			}
+			if s == "" {
+				return fmt.Errorf("stop[%d] is an empty string", i)
+			}
+		}
+		return nil
+	case float64, json.Number, int, int32, int64:
+		// Single token sequence as []any of integers.
+		for i, e := range list {
+			if err := validateScalarStop(e); err != nil {
+				return fmt.Errorf("stop[%d]: %w", i, err)
+			}
+		}
+		return nil
+	case []any:
+		// List of token sequences.
+		for i, e := range list {
+			seq, ok := e.([]any)
+			if !ok {
+				return fmt.Errorf("stop[%d] mixes sequence with %T", i, e)
+			}
+			for j, t := range seq {
+				if err := validateScalarStop(t); err != nil {
+					return fmt.Errorf("stop[%d][%d]: %w", i, j, err)
+				}
+			}
+		}
+		return nil
+	case []int:
+		for i, e := range list {
+			seq, ok := e.([]int)
+			if !ok {
+				return fmt.Errorf("stop[%d] mixes sequence with %T", i, e)
+			}
+			if err := validateIntStopSeq(seq); err != nil {
+				return fmt.Errorf("stop[%d]: %w", i, err)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("unsupported stop list element type %T", first)
 }
 
 func (s *Server) weightsInfo(w http.ResponseWriter, r *http.Request) {

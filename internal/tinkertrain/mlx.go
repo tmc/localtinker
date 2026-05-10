@@ -1079,6 +1079,18 @@ func promptOffsetFromWeights(weights []float64) (int, error) {
 	return offset + 1, nil
 }
 
+// stopTokenSequences converts a SamplingParams.Stop value into the [][]int
+// stop-sequence list used by the sampler. It accepts the SDK-supported shapes:
+//   - nil: no stop sequences
+//   - non-negative integer scalar: single one-token stop
+//   - string: tokenized into a single stop sequence (requires tok)
+//   - []string: each string tokenized into its own stop sequence
+//   - []int (non-negative): one stop sequence of token ids
+//   - [][]int (non-negative): list of stop sequences
+//   - homogeneous []any of strings or non-negative integer sequences
+//
+// Object shapes, fractional numbers, negative tokens, and mixed-type lists are
+// rejected with an explicit error.
 func stopTokenSequences(v any, tok mlxlm.Tokenizer) ([][]int, error) {
 	if v == nil {
 		return nil, nil
@@ -1092,17 +1104,57 @@ func stopTokenSequences(v any, tok mlxlm.Tokenizer) ([][]int, error) {
 	if stops, ok := v.([]string); ok {
 		return tokenizeStopStrings(tok, stops)
 	}
+	if seq, ok := v.([]int); ok {
+		if err := validateTokenSequence(seq); err != nil {
+			return nil, err
+		}
+		if len(seq) == 0 {
+			return nil, nil
+		}
+		return [][]int{append([]int(nil), seq...)}, nil
+	}
+	if seqs, ok := v.([][]int); ok {
+		out := make([][]int, 0, len(seqs))
+		for i, seq := range seqs {
+			if err := validateTokenSequence(seq); err != nil {
+				return nil, fmt.Errorf("stop[%d]: %w", i, err)
+			}
+			if len(seq) == 0 {
+				continue
+			}
+			out = append(out, append([]int(nil), seq...))
+		}
+		return out, nil
+	}
 	data, err := json.Marshal(v)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid stop value: %w", err)
 	}
-	var one []int
-	if err := json.Unmarshal(data, &one); err == nil && len(one) > 0 {
-		return [][]int{one}, nil
+	var one []json.Number
+	if err := json.Unmarshal(data, &one); err == nil {
+		seq, err := numbersToTokens(one)
+		if err != nil {
+			return nil, err
+		}
+		if len(seq) == 0 {
+			return nil, nil
+		}
+		return [][]int{seq}, nil
 	}
-	var many [][]int
+	var many [][]json.Number
 	if err := json.Unmarshal(data, &many); err == nil {
-		return many, nil
+		out := make([][]int, 0, len(many))
+		for i, raw := range many {
+			seq, err := numbersToTokens(raw)
+			if err != nil {
+				return nil, fmt.Errorf("stop[%d]: %w", i, err)
+			}
+			if len(seq) == 0 {
+				continue
+			}
+			out = append(out, seq)
+		}
+		return out, nil
 	}
 	var oneString string
 	if err := json.Unmarshal(data, &oneString); err == nil {
@@ -1112,7 +1164,34 @@ func stopTokenSequences(v any, tok mlxlm.Tokenizer) ([][]int, error) {
 	if err := json.Unmarshal(data, &manyStrings); err == nil {
 		return tokenizeStopStrings(tok, manyStrings)
 	}
-	return nil, nil
+	return nil, fmt.Errorf("unsupported stop value shape %T", v)
+}
+
+func validateTokenSequence(seq []int) error {
+	for j, t := range seq {
+		if t < 0 {
+			return fmt.Errorf("token[%d] = %d is negative", j, t)
+		}
+	}
+	return nil
+}
+
+func numbersToTokens(raw []json.Number) ([]int, error) {
+	out := make([]int, 0, len(raw))
+	for j, n := range raw {
+		v, err := n.Int64()
+		if err != nil {
+			return nil, fmt.Errorf("token[%d] = %s is not an integer", j, n.String())
+		}
+		if v < 0 {
+			return nil, fmt.Errorf("token[%d] = %d is negative", j, v)
+		}
+		if int64(int(v)) != v {
+			return nil, fmt.Errorf("token[%d] = %d overflows int", j, v)
+		}
+		out = append(out, int(v))
+	}
+	return out, nil
 }
 
 func tokenizeStopStrings(tok mlxlm.Tokenizer, stops []string) ([][]int, error) {
