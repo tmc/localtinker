@@ -298,7 +298,11 @@ func (d Datum) targets() ([]int, error) {
 		return nil, fmt.Errorf("missing target_tokens")
 	}
 	if target.SparseCrowIndices != nil || target.SparseColIndices != nil {
-		return nil, fmt.Errorf("sparse target_tokens are not supported")
+		dense, err := RehydrateCSR(target)
+		if err != nil {
+			return nil, err
+		}
+		target = dense
 	}
 	out := make([]int, len(target.Data))
 	for i, v := range target.Data {
@@ -323,7 +327,11 @@ func (d Datum) weights(n int) ([]float64, error) {
 		return out, nil
 	}
 	if weight.SparseCrowIndices != nil || weight.SparseColIndices != nil {
-		return nil, fmt.Errorf("sparse weights are not supported")
+		dense, err := RehydrateCSR(weight)
+		if err != nil {
+			return nil, err
+		}
+		weight = dense
 	}
 	if len(weight.Data) != n {
 		return nil, fmt.Errorf("weights=%d target tokens=%d", len(weight.Data), n)

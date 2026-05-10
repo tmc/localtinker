@@ -66,9 +66,9 @@ func TestRehydrateCSRMatchesDense(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := rehydrateCSR(tt.tensor)
+			got, err := tinkertrain.RehydrateCSR(tt.tensor)
 			if err != nil {
-				t.Fatalf("rehydrateCSR error = %v", err)
+				t.Fatalf("RehydrateCSR error = %v", err)
 			}
 			if got.SparseCrowIndices != nil || got.SparseColIndices != nil {
 				t.Errorf("sparse fields not cleared after rehydration: %+v", got)
@@ -190,7 +190,7 @@ func TestRehydrateCSRRejectsMalformed(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := rehydrateCSR(tt.tensor)
+			_, err := tinkertrain.RehydrateCSR(tt.tensor)
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
 			}
