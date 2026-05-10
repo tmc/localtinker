@@ -233,6 +233,20 @@ probe is on record. Evidence reviewed 2026-05-07.
   and the HTTP forward-rejection table in
   `internal/tinkerhttp.TestConformanceMalformedTrainingInputsReturnUserErrors`.
   Local-only contract; no hosted probe recorded.
+- The image asset store boundary is exposed as the
+  `tinkertrain.ImageAssetResolver` extension point. A fresh `Manager`
+  installs `DefaultImageAssetResolver`, which refuses with the typed
+  sentinel `ErrImageAssetStoreNotConfigured` so callers can detect the
+  missing-store boundary via `errors.Is` instead of string matching.
+  Embedders may plug in a real store (or
+  `tinkertrain.NewMapImageAssetResolver` for tests) via
+  `Manager.SetImageAssetResolver`. `tinkertrain.ResolveImageAssetPointer`
+  resolves a pointer chunk through the resolver and revalidates the
+  resulting bytes through `ValidateImageChunk`, so the magic-byte
+  contract is the single source of truth for both inline and resolved
+  image chunks. The MLX executor still refuses any multimodal chunk
+  regardless of resolver — pinned by
+  `TestExecutorRefusesImageAssetPointerEvenWithResolver`.
 - Hosted optimizer-resume response shape is recorded
   (`tinker_path_kind=weights`, `path_prefix_ok=true`,
   `response_path_matches=true`, `optimizer_state=null` on both sides:

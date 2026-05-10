@@ -13,9 +13,10 @@ import (
 var ErrNotFound = errors.New("model not found")
 
 type Manager struct {
-	mu       sync.Mutex
-	models   map[string]trainModel
-	samplers map[string]string
+	mu          sync.Mutex
+	models      map[string]trainModel
+	samplers    map[string]string
+	imageAssets ImageAssetResolver
 }
 
 type CreateConfig struct {
