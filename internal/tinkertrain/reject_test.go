@@ -12,18 +12,30 @@ func TestDatumTargetsRejects(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "sparse target via crow indices",
+			name: "sparse target missing col indices",
 			datum: Datum{LossFnInputs: map[string]TensorData{
 				"target_tokens": {Data: []float64{1, 2}, SparseCrowIndices: []int{0, 1}},
 			}},
-			wantErr: "sparse target_tokens are not supported",
+			wantErr: "sparse tensor requires both sparse_crow_indices and sparse_col_indices",
 		},
 		{
-			name: "sparse target via col indices",
+			name: "sparse target missing crow indices",
 			datum: Datum{LossFnInputs: map[string]TensorData{
 				"target_tokens": {Data: []float64{1, 2}, SparseColIndices: []int{0, 1}},
 			}},
-			wantErr: "sparse target_tokens are not supported",
+			wantErr: "sparse tensor requires both sparse_crow_indices and sparse_col_indices",
+		},
+		{
+			name: "sparse target with 1-D shape rejected",
+			datum: Datum{LossFnInputs: map[string]TensorData{
+				"target_tokens": {
+					Data:              []float64{1},
+					Shape:             []int{4},
+					SparseCrowIndices: []int{0, 1},
+					SparseColIndices:  []int{0},
+				},
+			}},
+			wantErr: "sparse tensor requires 2-D shape",
 		},
 		{
 			name: "dense target succeeds",
@@ -57,20 +69,33 @@ func TestDatumWeightsRejects(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "sparse weights via crow indices",
+			name: "sparse weights missing col indices",
 			datum: Datum{LossFnInputs: map[string]TensorData{
 				"weights": {Data: []float64{1, 1}, SparseCrowIndices: []int{0, 1}},
 			}},
 			n:       2,
-			wantErr: "sparse weights are not supported",
+			wantErr: "sparse tensor requires both sparse_crow_indices and sparse_col_indices",
 		},
 		{
-			name: "sparse weights via col indices",
+			name: "sparse weights missing crow indices",
 			datum: Datum{LossFnInputs: map[string]TensorData{
 				"weights": {Data: []float64{1, 1}, SparseColIndices: []int{0, 1}},
 			}},
 			n:       2,
-			wantErr: "sparse weights are not supported",
+			wantErr: "sparse tensor requires both sparse_crow_indices and sparse_col_indices",
+		},
+		{
+			name: "sparse weights bad crow length",
+			datum: Datum{LossFnInputs: map[string]TensorData{
+				"weights": {
+					Data:              []float64{0.5},
+					Shape:             []int{2, 2},
+					SparseCrowIndices: []int{0, 1},
+					SparseColIndices:  []int{0},
+				},
+			}},
+			n:       4,
+			wantErr: "sparse_crow_indices length 2, want 3 (nrows+1)",
 		},
 		{
 			name: "dense weights succeed",
