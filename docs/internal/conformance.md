@@ -247,6 +247,16 @@ probe is on record. Evidence reviewed 2026-05-07.
   image chunks. The MLX executor still refuses any multimodal chunk
   regardless of resolver — pinned by
   `TestExecutorRefusesImageAssetPointerEvenWithResolver`.
+- HTTP runtime users wire a resolver into the live server programmatically:
+  build a `tinkertrain.Manager`, call `SetImageAssetResolver`, and pass
+  the Manager as `tinkercoord.Config.Train` to `tinkercoord.New` before
+  constructing `tinkerhttp.New`. `Manager.ImageAssetResolver` retrieves
+  the live resolver out-of-band, since the HTTP handlers refuse
+  multimodal execution before the resolver would run. `cmd/localtinker`
+  intentionally exposes no flag for this — image assets are an
+  embedder-supplied capability, not a server-config knob. Pinned by
+  `internal/tinkerhttp.TestImageAssetResolverReachableThroughHTTPConfig`
+  and `TestImageAssetResolverDefaultRefusalThroughHTTPConfig`.
 - Hosted optimizer-resume response shape is recorded
   (`tinker_path_kind=weights`, `path_prefix_ok=true`,
   `response_path_matches=true`, `optimizer_state=null` on both sides:

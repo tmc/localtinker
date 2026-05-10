@@ -91,9 +91,13 @@ func (m *Manager) SetImageAssetResolver(r ImageAssetResolver) {
 	m.imageAssets = r
 }
 
-// imageAssetResolver returns the installed resolver, falling back to the
-// default refusing one if none has been set.
-func (m *Manager) imageAssetResolver() ImageAssetResolver {
+// ImageAssetResolver returns the installed resolver, falling back to
+// [DefaultImageAssetResolver] if none has been set. Callers wiring a
+// [Manager] into the HTTP runtime via tinkercoord.Config.Train can
+// retrieve the live resolver here to drive [ResolveImageAssetPointer]
+// out-of-band, since the HTTP handlers refuse multimodal execution
+// before the resolver would ever run.
+func (m *Manager) ImageAssetResolver() ImageAssetResolver {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.imageAssets == nil {
