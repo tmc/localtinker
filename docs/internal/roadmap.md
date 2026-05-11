@@ -214,20 +214,22 @@ Goal: keep local behavior honest against hosted Tinker.
 - Hosted numerics and local MLX numerics will differ. Hosted sampler rows and
   hosted optimizer metrics/resume shape are now recorded at `55ffaf5`.
   `docs/internal/hosted-comparison/20260511-b1f9f9c-sampler-distribution-local.jsonl`
-  records the paired local Qwen/Qwen3-8B sampler run; exact optimizer numeric
-  equivalence remains a comparison gap, not a local implementation gap.
+  records the paired local Qwen/Qwen3-8B sampler run.
+  `docs/internal/hosted-comparison/20260511-50b2ee8-optimizer-metrics-local.jsonl`
+  records the paired local optimizer/resume run. Hosted `optim_step` metrics are
+  empty while local reports `loss:mean`, `optimizer_backend:mlx`, and
+  `optimizer_step:unique`, so exact optimizer numeric equivalence is not
+  observable from hosted responses.
 
 ## Next Milestones
 
-1. Compare hosted/local optimizer metrics and resume behavior after
-   `optim_step`.
-2. Probe hosted private cross-owner archive denial with a second hosted
+1. Probe hosted private cross-owner archive denial with a second hosted
    principal.
-3. Revisit policy-loss capability advertising only if hosted starts accepting
+2. Revisit policy-loss capability advertising only if hosted starts accepting
    the recorded SDK-shaped TensorData fixture.
-4. MLX library setup (`MLX_LIB_PATH`) for clean checkouts is documented in
+3. MLX library setup (`MLX_LIB_PATH`) for clean checkouts is documented in
    `docs/mlx-setup.md` and referenced from the README.
-5. Deterministic sampler tests over a small cached model: covered by
+4. Deterministic sampler tests over a small cached model: covered by
    `TestSampleDeterministicSmallCachedModel`,
    `TestSampleDeterministicRepeats`, and `TestSampleDeterministicPrefix`
    in `internal/tinkertrain/sample_test.go`. They skip cleanly when

@@ -36,6 +36,11 @@ Closed locally:
   `cispo`, and `dro` execute locally; policy losses report `loss:sum`.
   Only `cross_entropy` is advertised as hosted-compatible because hosted
   rejects the recorded SDK-shaped policy-loss fixture before metrics.
+- Optimizer metrics/resume comparison. Hosted and local artifacts now cover the
+  same cross-entropy `forward_backward`, `optim_step`, TTL-compatible
+  `save_state`, and `create_training_client_from_state_with_optimizer` flow.
+  Hosted `optim_step` metrics are empty; local reports `loss:mean`,
+  `optimizer_backend:mlx`, and `optimizer_step:unique`.
 - Image asset extension point. `tinkertrain.ImageAssetResolver` is reachable
   through programmatic HTTP wiring.
 - Local queue, cancel, checkpoint archive metadata, and archive visibility
@@ -45,7 +50,6 @@ Open hosted/comparison gaps:
 
 - Hosted scheduler timing and operation backpressure.
 - Hosted private cross-owner archive denial, requiring a second principal.
-- Exact local-vs-hosted optimizer numeric equivalence after `optim_step`.
 
 ## Evidence Artifacts
 
@@ -62,6 +66,7 @@ Current in-repo artifacts:
 - `docs/internal/hosted-comparison/20260511-55ffaf5-sampler-distribution-hosted.jsonl`
 - `docs/internal/hosted-comparison/20260511-b1f9f9c-sampler-distribution-local.jsonl`
 - `docs/internal/hosted-comparison/20260511-55ffaf5-optimizer-metrics-hosted.jsonl`
+- `docs/internal/hosted-comparison/20260511-50b2ee8-optimizer-metrics-local.jsonl`
 - `docs/internal/hosted-comparison/20260511-55ffaf5-archive-auth-signed-url-hosted.jsonl`
 - `docs/internal/hosted-comparison/20260511-55ffaf5-cancel-future-hosted.jsonl`
 
@@ -83,6 +88,9 @@ GOWORK=off go test ./internal/tinkerhttp -run 'TestRetrieveFutureRoute|TestCance
 MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./internal/tinkerhttp -run '^(TestCheckpointRoutes|TestCheckpointArchiveAuthorization|TestExpiredCheckpointIsHiddenAndArchiveGone)$' -count=1
 MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOWORK=off go test ./cmd/localtinker -run 'TestPythonSDKScript/sdk_malformed_inputs' -count=1 -timeout=90s
 GOWORK=off go test ./internal/tinkertrain ./internal/tinkerhttp -run 'TestDatumTargetsRehydratesSparse|TestDatumWeightsRehydratesSparse|TestNormalizeTensorDataRehydratesNamedSparse|TestDenseCrossEntropyFractionalWeights|TestDensePolicyLossesReturnWeightedSumAndLogprobs|TestMultimodalChunkParsesAndCounts|TestMultimodalExecutionRejected|TestImageChunkHeaderValidation' -count=1
+jq -c . docs/internal/hosted-comparison/20260511-55ffaf5-optimizer-metrics-hosted.jsonl docs/internal/hosted-comparison/20260511-50b2ee8-optimizer-metrics-local.jsonl >/dev/null
+MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOWORK=off go test ./internal/tinkertrain -run 'TestOptimizerStateRoundTrip|TestManagerLoadStateWithOptimizer|TestCheckpointMetadataJSON' -count=1
+MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOWORK=off go test ./internal/tinkerhttp -run 'TestForwardBackwardAndOptimStepTune' -count=1 -timeout=3m
 ```
 
 The broad `cmd/localtinker` package path can enter the known long-running

@@ -300,13 +300,23 @@ probe is on record. Evidence reviewed 2026-05-11.
   (`tinker_path_kind=weights`, `path_prefix_ok=true`,
   `response_path_matches=true`, `optimizer_state=null` on both sides:
   `20260505-951b2dc` rows 10/22, `20260505-a995c00` rows 10/23), but exact
-  optimizer internals and numeric continuation are not asserted as
-  equivalent. Hosted `optim_step` metrics arrive empty
+  optimizer internals and numeric continuation are not asserted as equivalent.
+  The current paired evidence records the same cross-entropy
+  `forward_backward`, `optim_step`, TTL-compatible `save_state`, and
+  `create_training_client_from_state_with_optimizer` shape on hosted and local:
+  `docs/internal/hosted-comparison/20260511-55ffaf5-optimizer-metrics-hosted.jsonl`
+  and
+  `docs/internal/hosted-comparison/20260511-50b2ee8-optimizer-metrics-local.jsonl`.
+  Hosted `optim_step` metrics arrive empty
   (`20260505-951b2dc` row 7, `20260505-a995c00` row 7, and
   `docs/internal/hosted-comparison/20260511-55ffaf5-optimizer-metrics-hosted.jsonl`)
   while local emits
   `loss:mean`, `optimizer_backend:mlx`, `optimizer_step:unique`
-  (`20260505-951b2dc` row 19, `20260505-a995c00` row 20).
+  (`20260505-951b2dc` row 19, `20260505-a995c00` row 20, and
+  `docs/internal/hosted-comparison/20260511-50b2ee8-optimizer-metrics-local.jsonl`).
+  Exact optimizer numeric equivalence is therefore not observable from hosted
+  `optim_step` responses; the remaining difference is metric surface, not a
+  local implementation gap.
 - Hosted and local numeric results are not expected to match exactly. The
   CE forward loss mean differs by ~0.599 (`20260505-497eb1c` row 11) and the
   sampler returns different generated tokens for the same seed/temperature/
