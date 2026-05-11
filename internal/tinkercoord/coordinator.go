@@ -151,6 +151,7 @@ type DashboardSnapshot struct {
 	Capabilities ServerCapabilities `json:"capabilities"`
 	Queue        QueueState         `json:"queue"`
 	Sessions     []Session          `json:"sessions"`
+	Nodes        []DashboardNode    `json:"nodes"`
 	Models       []DashboardModel   `json:"models"`
 	Futures      []DashboardFuture  `json:"futures"`
 }
@@ -176,6 +177,18 @@ type DashboardModel struct {
 	IsLoRA      bool      `json:"is_lora"`
 	LoRARank    int       `json:"lora_rank"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+type DashboardNode struct {
+	ID             string          `json:"id"`
+	SessionID      string          `json:"session_id,omitempty"`
+	State          string          `json:"state"`
+	Capabilities   json.RawMessage `json:"capabilities,omitempty"`
+	MaxConcurrency int             `json:"max_concurrency,omitempty"`
+	Running        int             `json:"running,omitempty"`
+	StartedAt      time.Time       `json:"started_at,omitempty"`
+	LastSeenAt     time.Time       `json:"last_seen_at,omitempty"`
+	DrainingSince  time.Time       `json:"draining_since,omitempty"`
 }
 
 type DashboardFuture struct {
@@ -231,8 +244,41 @@ func New(cfg Config) (*Coordinator, error) {
 		sem:             make(chan struct{}, cfg.MaxOperations),
 		runs:            make(map[string]operationFunc),
 	}
+	c.registerLocalNode(context.Background())
 	c.recoverUnfinished(context.Background())
 	return c, nil
+}
+
+func (c *Coordinator) registerLocalNode(ctx context.Context) {
+	now := c.now().UTC()
+	node := tinkerdb.Node{
+		ID:             localNodeID,
+		State:          "healthy",
+		MaxConcurrency: c.maxOperations,
+		StartedAt:      now,
+		LastSeenAt:     now,
+	}
+	_ = c.store.PutNode(ctx, node)
+}
+
+func (c *Coordinator) updateLocalNodeRunning(ctx context.Context, running int) {
+	now := c.now().UTC()
+	node, err := c.store.GetNode(ctx, localNodeID)
+	if err != nil {
+		node = tinkerdb.Node{
+			ID:        localNodeID,
+			State:     "healthy",
+			StartedAt: now,
+		}
+	}
+	node.State = "healthy"
+	node.MaxConcurrency = c.maxOperations
+	node.Running = running
+	node.LastSeenAt = now
+	if node.StartedAt.IsZero() {
+		node.StartedAt = now
+	}
+	_ = c.store.PutNode(ctx, node)
 }
 
 func (c *Coordinator) ClientConfig(_ context.Context) ClientConfig {
@@ -303,6 +349,10 @@ func (c *Coordinator) DashboardSnapshot(ctx context.Context) (DashboardSnapshot,
 	if err != nil {
 		return DashboardSnapshot{}, err
 	}
+	nodes, err := c.store.ListNodes(ctx)
+	if err != nil {
+		return DashboardSnapshot{}, err
+	}
 	futures, err := c.store.ListFutures(ctx)
 	if err != nil {
 		return DashboardSnapshot{}, err
@@ -329,6 +379,13 @@ func (c *Coordinator) DashboardSnapshot(ctx context.Context) (DashboardSnapshot,
 	sort.Slice(outModels, func(i, j int) bool {
 		return outModels[i].CreatedAt.After(outModels[j].CreatedAt)
 	})
+	outNodes := make([]DashboardNode, 0, len(nodes))
+	for _, node := range nodes {
+		outNodes = append(outNodes, dashboardNode(node))
+	}
+	sort.Slice(outNodes, func(i, j int) bool {
+		return outNodes[i].ID < outNodes[j].ID
+	})
 	outFutures := make([]DashboardFuture, 0, len(futures))
 	var queue QueueState
 	for _, future := range futures {
@@ -344,6 +401,7 @@ func (c *Coordinator) DashboardSnapshot(ctx context.Context) (DashboardSnapshot,
 		Capabilities: c.Capabilities(ctx),
 		Queue:        queue,
 		Sessions:     outSessions,
+		Nodes:        outNodes,
 		Models:       outModels,
 		Futures:      outFutures,
 	}, nil
@@ -898,6 +956,7 @@ func (c *Coordinator) dispatchLocked() {
 			continue
 		}
 		c.sem <- struct{}{}
+		c.updateLocalNodeRunning(context.Background(), len(c.sem))
 		c.wg.Add(1)
 		go c.runQueuedOperation(future, run)
 	}
@@ -912,6 +971,7 @@ func (c *Coordinator) runQueuedOperation(future tinkerdb.Future, run operationFu
 		delete(c.runs, future.ID)
 	}
 	<-c.sem
+	c.updateLocalNodeRunning(context.Background(), len(c.sem))
 	c.dispatchLocked()
 	c.mu.Unlock()
 }
@@ -936,6 +996,20 @@ func (c *Coordinator) runOperation(ctx context.Context, future tinkerdb.Future, 
 		return
 	}
 	_ = c.finishFuture(ctx, future, result, nil, FutureComplete)
+}
+
+func dashboardNode(node tinkerdb.Node) DashboardNode {
+	return DashboardNode{
+		ID:             node.ID,
+		SessionID:      node.SessionID,
+		State:          node.State,
+		Capabilities:   append(json.RawMessage(nil), node.Capabilities...),
+		MaxConcurrency: node.MaxConcurrency,
+		Running:        node.Running,
+		StartedAt:      node.StartedAt,
+		LastSeenAt:     node.LastSeenAt,
+		DrainingSince:  node.DrainingSince,
+	}
 }
 
 func (c *Coordinator) finishFuture(ctx context.Context, future tinkerdb.Future, result any, errPayload any, state string) error {
