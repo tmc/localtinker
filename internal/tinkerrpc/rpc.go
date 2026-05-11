@@ -15,9 +15,11 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tmc/localtinker/internal/tinkercoord"
+	"github.com/tmc/localtinker/internal/tinkerdb"
 	"github.com/tmc/localtinker/internal/tinkerproto/tinkerv1"
 	"github.com/tmc/localtinker/internal/tinkerproto/tinkerv1/tinkerv1connect"
 )
@@ -278,7 +280,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.Handle(path, h)
 }
 
-func (s *Server) RegisterNode(_ context.Context, req *connect.Request[tinkerv1.RegisterNodeRequest]) (*connect.Response[tinkerv1.RegisterNodeResponse], error) {
+func (s *Server) RegisterNode(ctx context.Context, req *connect.Request[tinkerv1.RegisterNodeRequest]) (*connect.Response[tinkerv1.RegisterNodeResponse], error) {
 	msg := req.Msg
 	nodeID := msg.GetNodeId()
 	if nodeID == "" {
@@ -298,6 +300,9 @@ func (s *Server) RegisterNode(_ context.Context, req *connect.Request[tinkerv1.R
 		artifacts:  make(map[string]*tinkerv1.ArtifactInventory),
 	}
 	s.mu.Unlock()
+	if err := s.recordNode(ctx, nodeID, nodeHealthy, msg.GetName(), msg.GetLabels(), msg.GetCapabilities(), nil); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
 
 	return connect.NewResponse(&tinkerv1.RegisterNodeResponse{
 		CoordinatorId:       s.coordinatorID,
@@ -310,7 +315,7 @@ func (s *Server) RegisterNode(_ context.Context, req *connect.Request[tinkerv1.R
 	}), nil
 }
 
-func (s *Server) Heartbeat(_ context.Context, req *connect.Request[tinkerv1.HeartbeatRequest]) (*connect.Response[tinkerv1.HeartbeatResponse], error) {
+func (s *Server) Heartbeat(ctx context.Context, req *connect.Request[tinkerv1.HeartbeatRequest]) (*connect.Response[tinkerv1.HeartbeatResponse], error) {
 	msg := req.Msg
 	nodeID := msg.GetNodeId()
 	if nodeID == "" {
@@ -332,14 +337,55 @@ func (s *Server) Heartbeat(_ context.Context, req *connect.Request[tinkerv1.Hear
 	if node.state == nodeDraining && msg.GetLoad().GetActiveLeases() == 0 {
 		node.state = nodeDrained
 	}
+	state := node.state
+	name := ""
+	labels := cloneMap(node.labels)
+	caps := (*tinkerv1.NodeCapabilities)(nil)
+	if node.req != nil {
+		name = node.req.GetName()
+		caps = node.req.GetCapabilities()
+	}
 	prewarm := s.prewarmRootsLocked(nodeID)
 	s.mu.Unlock()
+	if err := s.recordNode(ctx, nodeID, state, name, labels, caps, msg.GetLoad()); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
 
 	return connect.NewResponse(&tinkerv1.HeartbeatResponse{
 		CoordinatorId:  s.coordinatorID,
 		DrainRequested: drain,
 		PrewarmRoots:   prewarm,
 	}), nil
+}
+
+func (s *Server) recordNode(ctx context.Context, id, state, name string, labels map[string]string, caps *tinkerv1.NodeCapabilities, load *tinkerv1.NodeLoad) error {
+	if state == "" {
+		state = nodeHealthy
+	}
+	node := tinkerdb.Node{
+		ID:         id,
+		Name:       name,
+		State:      state,
+		Labels:     cloneMap(labels),
+		Running:    int(load.GetActiveLeases()),
+		LastSeenAt: s.now().UTC(),
+	}
+	if caps != nil {
+		raw, err := protojson.Marshal(caps)
+		if err != nil {
+			return err
+		}
+		node.Capabilities = raw
+		node.MaxConcurrency = int(caps.GetMaxConcurrency())
+	}
+	if load != nil {
+		raw, err := protojson.Marshal(load)
+		if err != nil {
+			return err
+		}
+		node.Load = raw
+	}
+	return s.coord.RecordNode(ctx, node)
 }
 
 func (s *Server) prewarmRootsLocked(nodeID string) []string {

@@ -270,10 +270,11 @@ function docRow(left, right) {
 function Dashboard({ data, updatedAt }) {
   const coord = data.coordinator || {};
   const mesh = data.mesh || {};
+  const nodes = coord.nodes || [];
   return h('div', { class: 'layout' },
     h('section', { class: 'panel wide' },
-      h(SectionHead, { title: 'Nodes', detail: `${(mesh.nodes || []).length} registered` }),
-      h(NodesTable, { nodes: mesh.nodes || [] })
+      h(SectionHead, { title: 'Nodes', detail: `${nodes.length} registered` }),
+      h(NodesTable, { nodes })
     ),
     h('section', { class: 'panel wide' },
       h(SectionHead, { title: 'Queue', detail: queueDetail(coord.queue || {}) }),
@@ -341,10 +342,11 @@ function NodesTable({ nodes }) {
       h('tbody', null, nodes.map(node => {
         const load = node.load || {};
         const labels = node.labels || {};
-        return h('tr', { key: node.node_id },
-          h('td', null, h('strong', null, node.name || node.node_id), h('span', { class: 'muted block' }, node.node_id)),
+        const nodeID = node.id || node.node_id;
+        return h('tr', { key: nodeID },
+          h('td', null, h('strong', null, node.name || nodeID), h('span', { class: 'muted block' }, nodeID)),
           h('td', null, h('span', { class: `pill ${node.state === 'healthy' ? 'ok' : ''}` }, node.state || 'unknown')),
-          h('td', null, `${load.active_leases || 0} leases / ${load.queued_operations || 0} queued`),
+          h('td', null, `${node.running || load.active_leases || 0} leases / ${load.queued_operations || 0} queued`),
           h('td', null, formatBytes(load.memory_available_bytes || 0)),
           h('td', null, load.temperature_celsius ? `${load.temperature_celsius.toFixed(1)} C` : 'n/a'),
           h('td', null, String(node.artifacts || 0)),

@@ -180,15 +180,18 @@ type DashboardModel struct {
 }
 
 type DashboardNode struct {
-	ID             string          `json:"id"`
-	SessionID      string          `json:"session_id,omitempty"`
-	State          string          `json:"state"`
-	Capabilities   json.RawMessage `json:"capabilities,omitempty"`
-	MaxConcurrency int             `json:"max_concurrency,omitempty"`
-	Running        int             `json:"running,omitempty"`
-	StartedAt      time.Time       `json:"started_at,omitempty"`
-	LastSeenAt     time.Time       `json:"last_seen_at,omitempty"`
-	DrainingSince  time.Time       `json:"draining_since,omitempty"`
+	ID             string            `json:"id"`
+	Name           string            `json:"name,omitempty"`
+	SessionID      string            `json:"session_id,omitempty"`
+	State          string            `json:"state"`
+	Labels         map[string]string `json:"labels,omitempty"`
+	Capabilities   json.RawMessage   `json:"capabilities,omitempty"`
+	Load           json.RawMessage   `json:"load,omitempty"`
+	MaxConcurrency int               `json:"max_concurrency,omitempty"`
+	Running        int               `json:"running,omitempty"`
+	StartedAt      time.Time         `json:"started_at,omitempty"`
+	LastSeenAt     time.Time         `json:"last_seen_at,omitempty"`
+	DrainingSince  time.Time         `json:"draining_since,omitempty"`
 }
 
 type DashboardFuture struct {
@@ -279,6 +282,38 @@ func (c *Coordinator) updateLocalNodeRunning(ctx context.Context, running int) {
 		node.StartedAt = now
 	}
 	_ = c.store.PutNode(ctx, node)
+}
+
+func (c *Coordinator) RecordNode(ctx context.Context, node tinkerdb.Node) error {
+	now := c.now().UTC()
+	current, err := c.store.GetNode(ctx, node.ID)
+	if err == nil {
+		if node.StartedAt.IsZero() {
+			node.StartedAt = current.StartedAt
+		}
+		if node.Name == "" {
+			node.Name = current.Name
+		}
+		if len(node.Labels) == 0 {
+			node.Labels = current.Labels
+		}
+		if len(node.Capabilities) == 0 {
+			node.Capabilities = current.Capabilities
+		}
+		if len(node.Load) == 0 {
+			node.Load = current.Load
+		}
+		if node.MaxConcurrency == 0 {
+			node.MaxConcurrency = current.MaxConcurrency
+		}
+	}
+	if node.StartedAt.IsZero() {
+		node.StartedAt = now
+	}
+	if node.LastSeenAt.IsZero() {
+		node.LastSeenAt = now
+	}
+	return c.store.PutNode(ctx, node)
 }
 
 func (c *Coordinator) ClientConfig(_ context.Context) ClientConfig {
@@ -1001,15 +1036,29 @@ func (c *Coordinator) runOperation(ctx context.Context, future tinkerdb.Future, 
 func dashboardNode(node tinkerdb.Node) DashboardNode {
 	return DashboardNode{
 		ID:             node.ID,
+		Name:           node.Name,
 		SessionID:      node.SessionID,
 		State:          node.State,
+		Labels:         cloneStringMap(node.Labels),
 		Capabilities:   append(json.RawMessage(nil), node.Capabilities...),
+		Load:           append(json.RawMessage(nil), node.Load...),
 		MaxConcurrency: node.MaxConcurrency,
 		Running:        node.Running,
 		StartedAt:      node.StartedAt,
 		LastSeenAt:     node.LastSeenAt,
 		DrainingSince:  node.DrainingSince,
 	}
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func (c *Coordinator) finishFuture(ctx context.Context, future tinkerdb.Future, result any, errPayload any, state string) error {
