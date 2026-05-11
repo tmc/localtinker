@@ -767,6 +767,16 @@ func TestTrainingInputValidationRejectsPolicyLossInputs(t *testing.T) {
 			lossFn: "dro",
 			want:   `unsupported loss function "dro"`,
 		},
+		{
+			name:   "ppo remains unsupported",
+			lossFn: "ppo",
+			want:   `unsupported loss function "ppo"`,
+		},
+		{
+			name:   "cispo remains unsupported",
+			lossFn: "cispo",
+			want:   `unsupported loss function "cispo"`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
