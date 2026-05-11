@@ -161,6 +161,7 @@ type DashboardSnapshot struct {
 type QueueState struct {
 	Queued       int   `json:"queued"`
 	Running      int   `json:"running"`
+	Retrying     int   `json:"retrying"`
 	Complete     int   `json:"complete"`
 	UserError    int   `json:"user_error"`
 	SystemError  int   `json:"system_error"`
@@ -181,19 +182,25 @@ type DashboardModel struct {
 }
 
 type DashboardFuture struct {
-	ID             string    `json:"id"`
-	State          string    `json:"state"`
-	Operation      string    `json:"operation,omitempty"`
-	ModelID        string    `json:"model_id,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	CompletedAt    time.Time `json:"completed_at,omitempty"`
-	ResultBytes    int       `json:"result_bytes"`
-	ErrorBytes     int       `json:"error_bytes"`
-	RequestBytes   int64     `json:"request_bytes"`
-	LeaseID        string    `json:"lease_id,omitempty"`
-	LeaseExpiresAt time.Time `json:"lease_expires_at,omitempty"`
-	Metrics        MetricMap `json:"metrics,omitempty"`
-	Error          string    `json:"error,omitempty"`
+	ID              string    `json:"id"`
+	State           string    `json:"state"`
+	Operation       string    `json:"operation,omitempty"`
+	ModelID         string    `json:"model_id,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	CompletedAt     time.Time `json:"completed_at,omitempty"`
+	ResultBytes     int       `json:"result_bytes"`
+	ErrorBytes      int       `json:"error_bytes"`
+	RequestBytes    int64     `json:"request_bytes"`
+	LeaseID         string    `json:"lease_id,omitempty"`
+	LeaseExpiresAt  time.Time `json:"lease_expires_at,omitempty"`
+	Attempt         int       `json:"attempt,omitempty"`
+	MaxAttempts     int       `json:"max_attempts,omitempty"`
+	AssignedNodeID  string    `json:"assigned_node_id,omitempty"`
+	NextRunAt       time.Time `json:"next_run_at,omitempty"`
+	RetryReason     string    `json:"retry_reason,omitempty"`
+	LastHeartbeatAt time.Time `json:"last_heartbeat_at,omitempty"`
+	Metrics         MetricMap `json:"metrics,omitempty"`
+	Error           string    `json:"error,omitempty"`
 }
 
 type MetricMap map[string]float64
@@ -1067,15 +1074,21 @@ func (c *Coordinator) storeFuture(ctx context.Context, id string) (Future, error
 
 func dashboardFuture(future tinkerdb.Future) DashboardFuture {
 	out := DashboardFuture{
-		ID:             future.ID,
-		State:          future.State,
-		CreatedAt:      future.CreatedAt,
-		CompletedAt:    future.CompletedAt,
-		ResultBytes:    len(future.Result),
-		ErrorBytes:     len(future.Error),
-		RequestBytes:   future.RequestBytes,
-		LeaseID:        future.LeaseID,
-		LeaseExpiresAt: future.LeaseExpiresAt,
+		ID:              future.ID,
+		State:           future.State,
+		CreatedAt:       future.CreatedAt,
+		CompletedAt:     future.CompletedAt,
+		ResultBytes:     len(future.Result),
+		ErrorBytes:      len(future.Error),
+		RequestBytes:    future.RequestBytes,
+		LeaseID:         future.LeaseID,
+		LeaseExpiresAt:  future.LeaseExpiresAt,
+		Attempt:         future.Attempt,
+		MaxAttempts:     future.MaxAttempts,
+		AssignedNodeID:  future.AssignedNodeID,
+		NextRunAt:       future.NextRunAt,
+		RetryReason:     future.RetryReason,
+		LastHeartbeatAt: future.LastHeartbeatAt,
 	}
 	var meta struct {
 		Type    string `json:"type"`
@@ -1122,6 +1135,9 @@ func addQueueFuture(q *QueueState, future tinkerdb.Future) {
 	case FutureQueued:
 		q.Queued++
 		q.QueuedBytes += future.RequestBytes
+		if !future.NextRunAt.IsZero() || future.RetryReason != "" {
+			q.Retrying++
+		}
 	case FutureRunning:
 		q.Running++
 		q.RunningBytes += future.RequestBytes
