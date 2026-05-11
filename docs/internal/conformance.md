@@ -163,8 +163,8 @@ limited public beta only if the caveats below are stated plainly.
 | Area | Status | Publicization decision |
 | --- | --- | --- |
 | SDK route surface | Meaningful local coverage exists for sessions, futures, training, checkpoints, sampler flows, malformed inputs, and REST listings. | Beta-ready with the covered surface named. |
-| Hosted comparison | `hosted comparison fixture` records hosted-vs-local checkpoint, optimizer-resume, metrics, and sampler shape evidence. `hosted comparison fixture` records custom-loss shape evidence. `hosted comparison fixture` records dense cross-entropy shape and loss evidence. The `20260511-0480f94-*` artifacts add current local policy-loss, cancel-future, queue-backpressure, and archive authorization evidence. The `20260511-55ffaf5-*` hosted artifacts replace several credential blockers with live hosted observations. `hosted comparison fixture` records hosted two-future scheduler timing. | Covered for recorded shapes; numeric differences and policy-loss behavior remain caveats. |
-| Checkpoint downloads | Local HTTP archive URLs and metadata are covered. `hosted comparison fixture` records the current local route shape. `hosted comparison fixture` records hosted owner signed-URL shape for sampler weights. Hosted cross-owner authorization still needs a second principal. | Disclose for beta; blocker for hosted-compatible wording. |
+| Hosted comparison | `hosted comparison fixture` records hosted-vs-local checkpoint, optimizer-resume, metrics, and sampler shape evidence. `hosted comparison fixture` records custom-loss shape evidence. `hosted comparison fixture` records dense cross-entropy shape and loss evidence. The `20260511-0480f94-*` artifacts add current local policy-loss, cancel-future, queue-backpressure, and archive authorization evidence. The `20260511-55ffaf5-*` hosted artifacts replace several credential blockers with live hosted observations. `hosted comparison fixture` records hosted two-future scheduler timing. `hosted comparison fixture` records hosted archive denial for a synthetic invalid credential. | Covered for recorded shapes; numeric differences and policy-loss behavior remain caveats. |
+| Checkpoint downloads | Local HTTP archive URLs and metadata are covered. `hosted comparison fixture` records the current local route shape. `hosted comparison fixture` records hosted owner signed-URL shape for sampler weights. `hosted comparison fixture` records hosted `401` invalid-credential denial for the same archive URL surface. Hosted cross-owner authorization still needs a valid second principal. | Disclose for beta; blocker for hosted-compatible wording. |
 | Futures and queueing | Local queue, cancellation, panic containment, unfinished-queue recovery, and local queue backpressure timing are covered. `hosted comparison fixture` records the local cancel route and SDK retrieve-only surface. `hosted comparison fixture` records hosted raw `/api/v1/cancel_future` returning 404. `hosted comparison fixture` records the local one-slot queue case. `hosted comparison fixture` records hosted accepting two concurrent futures and returning `queue_state:"active"` for both. | Beta-ready with queue-state caveat. |
 | Cross-entropy | Dense tensors, CSR `target_tokens`/`weights` rehydration, unsupported sparse tensor rejection, invalid weights, and logprobs are covered locally. `hosted comparison fixture` records matching hosted/local per-token logprob shapes and a forward loss mean difference. `hosted comparison fixture` records hosted arbitrary fractional dense weights succeeding with `loss:sum` and per-token outputs. | Beta-ready with numeric and metric-name caveats. |
 | Custom losses | `hosted comparison fixture` records hosted and local `forward_backward_custom` success and `custom_loss:mean` metric shape evidence. | Beta-ready with numeric caveats. |
@@ -202,8 +202,7 @@ probe is on record. Evidence reviewed 2026-05-11.
   (`20260505-951b2dc` rows 11 and 23; `20260505-a995c00` rows 11 and 24).
 - Checkpoint ownership is recorded as `owner=null`, `public=false` on both
   sides in the recorded archive_download events
-  (`20260505-951b2dc` rows 11/23, `20260505-a995c00` rows 11/24). No hosted
-  probe of authorization-failure or cross-owner access is recorded.
+  (`20260505-951b2dc` rows 11/23, `20260505-a995c00` rows 11/24).
   Local archive responses now reflect coordinator state on the
   `X-Tinker-Archive-Owner` and `X-Tinker-Archive-Visibility` headers
   (`private` by default, `public` after publish, back to `private` after
@@ -215,7 +214,11 @@ probe is on record. Evidence reviewed 2026-05-11.
   Hosted owner-side archive shape for sampler weights is recorded in
   `hosted comparison fixture`:
   hosted returns an HTTPS object-store signed URL ending in `archive.tar` with
-  six `X-Goog-*` query keys and an `expires` timestamp. A second hosted
+  six `X-Goog-*` query keys and an `expires` timestamp. Hosted invalid-token
+  denial is recorded in
+  `hosted comparison fixture`:
+  the same archive URL surface returns `401` with `detail:"Unable to validate
+  credential"` for a synthetic invalid credential. A valid second hosted
   principal is still required for true cross-owner private denial.
   Hosted-style signed URL emulation and cross-owner authorization remain
   intentionally out of scope for the local coordinator.

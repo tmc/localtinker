@@ -40,7 +40,8 @@ jq -c . hosted comparison fixtures >/dev/null
 | Gap | Artifact | Required hosted input |
 | --- | --- | --- |
 | Queue/backpressure regression check | `hosted comparison fixture` plus `hosted comparison fixture` | Reprobe only when hosted scheduler or future metadata semantics change |
-| Checkpoint archive cross-owner denial | `hosted comparison fixture` or successor artifact | `TINKER_API_KEY`, second principal |
+| Checkpoint archive invalid-credential control | `hosted comparison fixture` | Reprobe only when archive authorization error shape changes; this is not cross-owner evidence |
+| Checkpoint archive cross-owner denial | `hosted comparison fixture` plus future successor artifact | `TINKER_API_KEY`, valid second principal |
 | Sampler distribution regression check | `hosted comparison fixture` plus `hosted comparison fixture` | Reprobe only when sampler semantics or model mapping changes |
 | Optimizer metric-surface regression check | `hosted comparison fixture` plus `hosted comparison fixture` | Reprobe only when optimizer response semantics change; hosted `optim_step` metrics are empty in the recorded fixture |
 | Policy-loss capability regression check | `hosted comparison fixture` | Reprobe only if hosted starts accepting the recorded SDK-shaped TensorData fixture; local currently keeps policy-loss execution available but does not advertise it as hosted-compatible |
