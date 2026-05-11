@@ -371,6 +371,97 @@ func TestCancelQueuedFuture(t *testing.T) {
 	}
 }
 
+func TestCancelRunningFutureInvokesHook(t *testing.T) {
+	store := tinkerdb.OpenMemory()
+	hooked := make(chan tinkerdb.Future, 1)
+	c, err := New(Config{
+		Store:         store,
+		MaxOperations: 1,
+		LeaseTimeout:  time.Minute,
+		CancelHook: func(_ context.Context, future tinkerdb.Future) error {
+			hooked <- future
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	future, err := c.EnqueueFuture(context.Background(),
+		map[string]any{"type": "forward", "model_id": "model-a"},
+		1,
+		func(context.Context) (any, error) {
+			close(started)
+			<-release
+			return map[string]any{"ok": true}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	canceled, err := c.CancelFuture(context.Background(), future.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canceled.State != FutureCanceled {
+		t.Fatalf("state = %q, want %q", canceled.State, FutureCanceled)
+	}
+	select {
+	case got := <-hooked:
+		if got.ID != future.ID || got.LeaseID == "" || got.AssignedNodeID != localNodeID {
+			t.Fatalf("hook future = %#v", got)
+		}
+	default:
+		t.Fatal("cancel hook was not called")
+	}
+	close(release)
+	eventuallyFutureState(t, c, future.ID, FutureCanceled)
+}
+
+func TestCancelQueuedFutureSkipsHook(t *testing.T) {
+	store := tinkerdb.OpenMemory()
+	called := false
+	c, err := New(Config{
+		Store:         store,
+		MaxOperations: 1,
+		LeaseTimeout:  time.Minute,
+		CancelHook: func(context.Context, tinkerdb.Future) error {
+			called = true
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := make(chan struct{})
+	first, err := c.EnqueueFuture(context.Background(), map[string]any{"type": "first"}, 1, func(context.Context) (any, error) {
+		<-block
+		return map[string]any{"ok": true}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventuallyStoredState(t, store, first.ID, FutureRunning)
+	second, err := c.EnqueueFuture(context.Background(), map[string]any{"type": "second"}, 1, func(context.Context) (any, error) {
+		return map[string]any{"ok": true}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventuallyStoredState(t, store, second.ID, FutureQueued)
+	if _, err := c.CancelFuture(context.Background(), second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("cancel hook called for queued future")
+	}
+	close(block)
+	eventuallyFutureState(t, c, first.ID, FutureComplete)
+	eventuallyFutureState(t, c, second.ID, FutureCanceled)
+}
+
 func TestRunningFutureLeaseExpiry(t *testing.T) {
 	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 	store := tinkerdb.OpenMemory()

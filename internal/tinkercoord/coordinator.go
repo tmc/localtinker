@@ -41,6 +41,7 @@ type Coordinator struct {
 
 	maxOperations int
 	leaseTimeout  time.Duration
+	cancelHook    func(context.Context, tinkerdb.Future) error
 	sem           chan struct{}
 	wg            sync.WaitGroup
 	mu            sync.Mutex
@@ -55,6 +56,7 @@ type Config struct {
 	MaxRequestBytes int
 	MaxOperations   int
 	LeaseTimeout    time.Duration
+	CancelHook      func(context.Context, tinkerdb.Future) error
 }
 
 type Session struct {
@@ -244,6 +246,7 @@ func New(cfg Config) (*Coordinator, error) {
 		maxRequestBytes: cfg.MaxRequestBytes,
 		maxOperations:   cfg.MaxOperations,
 		leaseTimeout:    cfg.LeaseTimeout,
+		cancelHook:      cfg.CancelHook,
 		sem:             make(chan struct{}, cfg.MaxOperations),
 		runs:            make(map[string]operationFunc),
 	}
@@ -1205,6 +1208,11 @@ func (c *Coordinator) CancelFuture(ctx context.Context, id string) (Future, erro
 	}
 	switch future.State {
 	case FutureQueued, FutureRunning:
+		if future.State == FutureRunning && c.cancelHook != nil {
+			if err := c.cancelHook(ctx, future); err != nil {
+				return Future{}, err
+			}
+		}
 		if err := c.finishFuture(ctx, future, nil, map[string]any{
 			"code":    "canceled",
 			"message": "operation canceled",
