@@ -196,6 +196,9 @@ Goal: keep local behavior honest against hosted Tinker.
 - Policy losses `importance_sampling`, `ppo`, `cispo`, and `dro` execute
   locally and are covered by local JSONL rows. Hosted policy-loss evidence is
   still blocked on `TINKER_API_KEY` and `TINKER_BASE_URL`.
+- Arbitrary non-prefix fractional dense weights execute locally and are
+  covered by local JSONL rows. Hosted evidence for the same fractional input
+  remains blocked on `TINKER_API_KEY` and `TINKER_BASE_URL`.
 - Checkpoint archive URLs are local HTTP download URLs. Local owner,
   visibility, expiration, and private/public state are pinned, but hosted
   signed URL shape and cross-owner authorization evidence require hosted
@@ -209,15 +212,17 @@ Goal: keep local behavior honest against hosted Tinker.
 1. When hosted credentials are available, run the hosted probes in
    `/tmp/localtinker-hosted-probe-resume-21D23B54.md` and replace blocker rows
    with real hosted evidence rows.
-2. Compare hosted/local sampler distributions across fixed prompts, seeds,
+2. Submit the hosted fractional dense-weight fixture and compare response
+   shape plus `loss_fn_outputs.weights`/loss metrics against the local row.
+3. Compare hosted/local sampler distributions across fixed prompts, seeds,
    temperature, top-p, and top-k.
-3. Compare hosted/local optimizer metrics and resume behavior after
+4. Compare hosted/local optimizer metrics and resume behavior after
    `optim_step`.
-4. Probe hosted checkpoint signed URL shape and private cross-owner archive
+5. Probe hosted checkpoint signed URL shape and private cross-owner archive
    denial with a second hosted principal.
-5. MLX library setup (`MLX_LIB_PATH`) for clean checkouts is documented in
+6. MLX library setup (`MLX_LIB_PATH`) for clean checkouts is documented in
    `docs/mlx-setup.md` and referenced from the README.
-6. Deterministic sampler tests over a small cached model: covered by
+7. Deterministic sampler tests over a small cached model: covered by
    `TestSampleDeterministicSmallCachedModel`,
    `TestSampleDeterministicRepeats`, and `TestSampleDeterministicPrefix`
    in `internal/tinkertrain/sample_test.go`. They skip cleanly when

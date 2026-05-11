@@ -39,6 +39,8 @@ Open hosted-evidence gaps:
 
 - Policy loss response shapes for hosted `importance_sampling`, `ppo`, `cispo`,
   and `dro`.
+- Hosted response shape and metrics for arbitrary non-prefix fractional dense
+  weights.
 - Hosted cancel future behavior.
 - Hosted scheduler timing and operation backpressure.
 - Hosted checkpoint signed URL shape and private cross-owner archive denial.
