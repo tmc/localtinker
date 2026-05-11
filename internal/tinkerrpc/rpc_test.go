@@ -526,6 +526,94 @@ func TestWatchRequeuesExpiredOperationLease(t *testing.T) {
 	}
 }
 
+func TestCancelOperationRevokesLeaseOnWatch(t *testing.T) {
+	rpc := newTestRPC(t)
+	rpc.nodes["node-a"] = &nodeState{
+		state:     nodeHealthy,
+		load:      &tinkerv1.NodeLoad{},
+		artifacts: make(map[string]*tinkerv1.ArtifactInventory),
+	}
+	opID, err := rpc.EnqueueOperation("forward", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := rpc.watchCommand("node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.GetRun() == nil || run.GetOperationId() != opID {
+		t.Fatalf("run command = %+v, want operation %s", run, opID)
+	}
+	if !rpc.CancelOperation(opID, "test cancel") {
+		t.Fatal("CancelOperation returned false")
+	}
+	revoke, err := rpc.watchCommand("node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revoke.GetRevoke() == nil {
+		t.Fatalf("revoke command = %+v, want revoke", revoke)
+	}
+	if revoke.GetOperationId() != opID || revoke.GetLeaseId() != run.GetLeaseId() {
+		t.Fatalf("revoke command = {OperationID:%q LeaseID:%q}, want {%q %q}", revoke.GetOperationId(), revoke.GetLeaseId(), opID, run.GetLeaseId())
+	}
+	if got := revoke.GetRevoke().GetReason(); got != "test cancel" {
+		t.Fatalf("revoke reason = %q, want test cancel", got)
+	}
+	again, err := rpc.watchCommand("node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again != nil {
+		t.Fatalf("second command = %+v, want nil", again)
+	}
+}
+
+func TestCanceledOperationTerminalReportQueuesAck(t *testing.T) {
+	rpc := newTestRPC(t)
+	rpc.nodes["node-a"] = &nodeState{
+		state:     nodeHealthy,
+		load:      &tinkerv1.NodeLoad{},
+		artifacts: make(map[string]*tinkerv1.ArtifactInventory),
+	}
+	opID, err := rpc.EnqueueOperation("forward", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := rpc.watchCommand("node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rpc.CancelOperation(opID, "test cancel") {
+		t.Fatal("CancelOperation returned false")
+	}
+	if _, err := rpc.watchCommand("node-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rpc.applyNodeEvent(&tinkerv1.NodeEvent{
+		NodeId:      "node-a",
+		CommandId:   cmd.GetCommandId(),
+		LeaseId:     cmd.GetLeaseId(),
+		OperationId: opID,
+		Kind:        cmd.GetKind(),
+		Payload:     &tinkerv1.NodeEvent_Completed{Completed: &tinkerv1.OperationCompleted{}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snap := rpc.Snapshot()
+	got := operationSnapshot(t, snap, opID)
+	if got.State != operationFailed || got.LastErrorCode != "canceled" || !got.AckPending {
+		t.Fatalf("operation snapshot = %+v, want canceled failure with ack pending", got)
+	}
+	ack, err := rpc.watchCommand("node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ack.GetAckOperation() == nil || len(ack.GetAckOperation().GetOperationIds()) != 1 || ack.GetAckOperation().GetOperationIds()[0] != opID {
+		t.Fatalf("ack command = %+v, want operation %s", ack, opID)
+	}
+}
+
 func TestReportTerminalOperationQueuesAck(t *testing.T) {
 	rpc := newTestRPC(t)
 	rpc.nodes["node-a"] = &nodeState{
