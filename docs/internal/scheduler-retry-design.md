@@ -286,15 +286,13 @@ Add dashboard node rows from `tinkerdb.Node`:
 - running count / max concurrency.
 - models and thermal label.
 
-The dashboard must not show two competing node inventories. Today the web
-dashboard combines `tinkercoord.DashboardSnapshot` with `tinkerrpc.Snapshot`.
-After durable nodes land, choose one source of truth:
-
-- Preferred: `tinkerdb.Node` is durable truth for node identity, state, last
-  seen time, capacity, and labels; `tinkerrpc.Snapshot` only supplies ephemeral
-  transport details such as active watch streams and pending command counts.
-- Do not render both as separate node lists.
-- Reconcile by node ID when both snapshots are present.
+The dashboard must not show two competing node inventories. The web dashboard
+combines `tinkercoord.DashboardSnapshot` with `tinkerrpc.Snapshot`, but node
+identity, state, last seen time, capacity, and labels come from durable
+`tinkerdb.Node` rows through `coord.nodes`. `tinkerrpc.Snapshot` is only for
+ephemeral transport details such as active watch streams and pending command
+counts. Do not render both snapshots as separate node lists; reconcile by node
+ID when transport details are shown.
 
 Every terminal failure after retries should include a compact error payload:
 

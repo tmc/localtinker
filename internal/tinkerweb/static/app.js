@@ -550,7 +550,7 @@ function metric(label, value) {
 function summarize(data) {
   const coord = (data && data.coordinator) || {};
   const mesh = (data && data.mesh) || {};
-  const nodes = mesh.nodes || [];
+  const nodes = coord.nodes || [];
   const queue = coord.queue || {};
   const detail = runDetail(coord.futures || []);
   return {
