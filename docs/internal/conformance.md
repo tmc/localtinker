@@ -208,6 +208,13 @@ probe is on record. Evidence reviewed 2026-05-07.
   both sides and `absolute_difference=0.5989780426025391`
   (`20260505-497eb1c` row 11, hosted source `computed_from_logprobs`,
   local source `metrics.loss:mean`).
+- Policy losses `importance_sampling`, `ppo`, `cispo`, and `dro` execute
+  locally with the public Tinker loss formulas and return per-token
+  `logprobs`; policy loss metrics use `loss:sum`. PPO and CISPO default to
+  clip thresholds `0.8` and `1.2`; DRO requires an explicit
+  `loss_fn_config["beta"]` because no hosted default is documented. Pinned by
+  `internal/tinkertrain.TestDensePolicyLossesReturnWeightedSumAndLogprobs`.
+  No hosted/local JSONL probe has been recorded for policy losses yet.
 - Sparse `TensorData` inputs are rejected; only dense tensor inputs are
   supported. Local-only contract; no hosted probe recorded.
 - Arbitrary non-prefix fractional dense weights (e.g. `[0.25, 1, 0, 0.75]`

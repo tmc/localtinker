@@ -13,17 +13,17 @@ training = client.create_lora_training_client(
 
 ## Forward
 
-`forward(data, "cross_entropy")` computes local loss without applying
-gradients.
+`forward(data, loss_fn)` computes local loss without applying gradients.
 
-localtinker supports dense cross entropy inputs through the upstream SDK data
-types. Unsupported tensor forms, including sparse TensorData, return local user
-errors.
+localtinker supports dense cross entropy and policy-loss inputs through the
+upstream SDK data types. Built-in policy losses are `importance_sampling`,
+`ppo`, `cispo`, and `dro`; DRO requires an explicit `loss_fn_config["beta"]`.
+Unsupported tensor forms return local user errors.
 
 ## Forward And Backward
 
-`forward_backward(data, "cross_entropy")` computes loss and gradients for a
-subsequent optimizer step.
+`forward_backward(data, loss_fn)` computes loss and gradients for a subsequent
+optimizer step.
 
 ```python
 future = training.forward_backward(data, "cross_entropy")
@@ -59,4 +59,4 @@ signed URL authorization is not reproduced.
 
 The dashboard and future records include local metrics such as loss, token
 count, gradient norm, max update, optimizer step, and backend markers when
-available.
+available. Cross entropy reports `loss:mean`; policy losses report `loss:sum`.

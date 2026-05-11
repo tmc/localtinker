@@ -151,14 +151,19 @@ func (m *mlxModel) forwardBackward(ctx context.Context, input ForwardBackwardInp
 	if backward {
 		m.pending = batch
 	}
+	metrics := map[string]float64{
+		"tokens:sum":   batch.weightSum,
+		"examples:sum": float64(len(batch.rows)),
+	}
+	if policyLoss(batch.lossFn) {
+		metrics["loss:sum"] = out.loss
+	} else {
+		metrics["loss:mean"] = out.loss
+	}
 	return ForwardBackwardOutput{
 		LossFnOutputType: "TensorData",
 		LossFnOutputs:    out.lossOutputs,
-		Metrics: map[string]float64{
-			"loss:mean":    out.loss,
-			"tokens:sum":   batch.weightSum,
-			"examples:sum": float64(len(batch.rows)),
-		},
+		Metrics:          metrics,
 	}, nil
 }
 
@@ -565,6 +570,13 @@ type denseBatch struct {
 	seqLen    int
 	weightSum float64
 	lossFn    string
+	config    policyLossConfig
+}
+
+type policyLossConfig struct {
+	clipLow  float32
+	clipHigh float32
+	beta     float32
 }
 
 type denseRow struct {
@@ -583,14 +595,18 @@ type denseEvalOutput struct {
 
 func newDenseBatch(input ForwardBackwardInput) (denseBatch, error) {
 	switch input.LossFn {
-	case "cross_entropy", "importance_sampling":
+	case "cross_entropy", "importance_sampling", "ppo", "cispo", "dro":
 	default:
 		return denseBatch{}, fmt.Errorf("unsupported loss function %q", input.LossFn)
 	}
 	if len(input.Data) == 0 {
 		return denseBatch{}, fmt.Errorf("no data")
 	}
-	batch := denseBatch{lossFn: input.LossFn}
+	config, err := parsePolicyLossConfig(input.LossFn, input.LossFnConfig)
+	if err != nil {
+		return denseBatch{}, err
+	}
+	batch := denseBatch{lossFn: input.LossFn, config: config}
 	batch.rows = make([]denseRow, 0, len(input.Data))
 	for i, datum := range input.Data {
 		if err := datum.ModelInput.multimodalRefusal(); err != nil {
@@ -639,6 +655,54 @@ func newDenseBatch(input ForwardBackwardInput) (denseBatch, error) {
 	return batch, nil
 }
 
+func parsePolicyLossConfig(lossFn string, config map[string]float64) (policyLossConfig, error) {
+	out := policyLossConfig{clipLow: 0.8, clipHigh: 1.2}
+	switch lossFn {
+	case "cross_entropy", "importance_sampling":
+		for name := range config {
+			return out, fmt.Errorf("unsupported loss_fn_config key %q for %s", name, lossFn)
+		}
+	case "ppo", "cispo":
+		for name, v := range config {
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				return out, fmt.Errorf("loss_fn_config[%q] = %v is not finite", name, v)
+			}
+			if v <= 0 {
+				return out, fmt.Errorf("loss_fn_config[%q] = %v is not positive", name, v)
+			}
+			switch name {
+			case "clip_low_threshold":
+				out.clipLow = float32(v)
+			case "clip_high_threshold":
+				out.clipHigh = float32(v)
+			default:
+				return out, fmt.Errorf("unsupported loss_fn_config key %q for %s", name, lossFn)
+			}
+		}
+		if out.clipLow > out.clipHigh {
+			return out, fmt.Errorf("clip_low_threshold %v exceeds clip_high_threshold %v", out.clipLow, out.clipHigh)
+		}
+	case "dro":
+		beta, ok := config["beta"]
+		if !ok {
+			return out, fmt.Errorf("missing loss_fn_config[\"beta\"] for dro")
+		}
+		for name, v := range config {
+			if name != "beta" {
+				return out, fmt.Errorf("unsupported loss_fn_config key %q for dro", name)
+			}
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				return out, fmt.Errorf("loss_fn_config[%q] = %v is not finite", name, v)
+			}
+			if v <= 0 {
+				return out, fmt.Errorf("loss_fn_config[%q] = %v is not positive", name, v)
+			}
+		}
+		out.beta = float32(beta)
+	}
+	return out, nil
+}
+
 func (d Datum) policyInputs(n int, lossFn string) (logprobs, advantages []float64, err error) {
 	if lossFn == "cross_entropy" {
 		return nil, nil, nil
@@ -652,6 +716,14 @@ func (d Datum) policyInputs(n int, lossFn string) (logprobs, advantages []float6
 		return nil, nil, err
 	}
 	return logprobs, advantages, nil
+}
+
+func policyLoss(lossFn string) bool {
+	switch lossFn {
+	case "importance_sampling", "ppo", "cispo", "dro":
+		return true
+	}
+	return false
 }
 
 func (d Datum) policyTensor(name string, n int) ([]float64, error) {
@@ -743,7 +815,7 @@ func (b denseBatch) arrays() (inputs, targets, weights, logprobs, advantages *ml
 		targets.Free()
 		return nil, nil, nil, nil, nil, fmt.Errorf("weights: %w", err)
 	}
-	if b.lossFn == "importance_sampling" {
+	if policyLoss(b.lossFn) {
 		logprobs, err = mlx.FromSlice(logprobData, []int{len(b.rows), b.seqLen}, mlx.Float32)
 		if err != nil {
 			inputs.Free()
@@ -790,8 +862,8 @@ func (m *mlxModel) evaluateDenseBatch(ctx context.Context, batch denseBatch) (de
 		switch batch.lossFn {
 		case "cross_entropy":
 			loss, logprobs, err = denseCrossEntropy(logits, targets, weights)
-		case "importance_sampling":
-			loss, logprobs, err = denseImportanceSampling(logits, targets, weights, oldLogprobs, advantages)
+		case "importance_sampling", "ppo", "cispo", "dro":
+			loss, logprobs, err = densePolicyLoss(batch.lossFn, logits, targets, weights, oldLogprobs, advantages, batch.config)
 		default:
 			err = fmt.Errorf("unsupported loss function %q", batch.lossFn)
 		}
@@ -865,8 +937,8 @@ func (m *mlxModel) trainDenseStep(ctx context.Context, batch denseBatch, params 
 		case "cross_entropy":
 			loss, _, err := denseCrossEntropy(logits, extraInputs[1], extraInputs[2])
 			return loss, err
-		case "importance_sampling":
-			loss, _, err := denseImportanceSampling(logits, extraInputs[1], extraInputs[2], extraInputs[3], extraInputs[4])
+		case "importance_sampling", "ppo", "cispo", "dro":
+			loss, _, err := densePolicyLoss(batch.lossFn, logits, extraInputs[1], extraInputs[2], extraInputs[3], extraInputs[4], batch.config)
 			return loss, err
 		default:
 			return nil, fmt.Errorf("unsupported loss function %q", batch.lossFn)
@@ -881,7 +953,7 @@ func (m *mlxModel) trainDenseStep(ctx context.Context, batch denseBatch, params 
 
 	nextra := 3
 	extraInputs := []*mlx.Array{inputs, targets, weights}
-	if batch.lossFn == "importance_sampling" {
+	if policyLoss(batch.lossFn) {
 		nextra = 5
 		extraInputs = append(extraInputs, oldLogprobs, advantages)
 	}
@@ -940,7 +1012,7 @@ func denseCrossEntropy(logits, targets, weights *mlx.Array) (loss, logprobs *mlx
 	return loss, logprobs, nil
 }
 
-func denseImportanceSampling(logits, targets, weights, oldLogprobs, advantages *mlx.Array) (loss, logprobs *mlx.Array, err error) {
+func densePolicyLoss(lossFn string, logits, targets, weights, oldLogprobs, advantages *mlx.Array, config policyLossConfig) (loss, logprobs *mlx.Array, err error) {
 	logprobs, err = denseLogprobs(logits, targets)
 	if err != nil {
 		return nil, nil, err
@@ -966,18 +1038,57 @@ func denseImportanceSampling(logits, targets, weights, oldLogprobs, advantages *
 	defer delta.Free()
 	ratio := mlx.Exp(delta)
 	defer ratio.Free()
-	weightedAdvantage := mlx.Multiply(ratio, advantages)
-	defer weightedAdvantage.Free()
-	weighted := mlx.Multiply(weightedAdvantage, weights)
+	var objective *mlx.Array
+	switch lossFn {
+	case "importance_sampling":
+		objective = mlx.Multiply(ratio, advantages)
+	case "ppo":
+		low := mlx.NewScalar(config.clipLow)
+		defer low.Free()
+		high := mlx.NewScalar(config.clipHigh)
+		defer high.Free()
+		clippedRatio := mlx.Clip(ratio, low, high)
+		defer clippedRatio.Free()
+		unclipped := mlx.Multiply(ratio, advantages)
+		defer unclipped.Free()
+		clipped := mlx.Multiply(clippedRatio, advantages)
+		defer clipped.Free()
+		objective = mlx.Minimum(unclipped, clipped)
+	case "cispo":
+		low := mlx.NewScalar(config.clipLow)
+		defer low.Free()
+		high := mlx.NewScalar(config.clipHigh)
+		defer high.Free()
+		clippedRatio := mlx.Clip(ratio, low, high)
+		defer clippedRatio.Free()
+		detached := mlx.StopGradient(clippedRatio)
+		defer detached.Free()
+		weightedLogprobs := mlx.Multiply(detached, logprobs)
+		defer weightedLogprobs.Free()
+		objective = mlx.Multiply(weightedLogprobs, advantages)
+	case "dro":
+		linear := mlx.Multiply(logprobs, advantages)
+		defer linear.Free()
+		square := mlx.Square(delta)
+		defer square.Free()
+		penalty := mlx.MultiplyScalar(square, 0.5*config.beta)
+		defer penalty.Free()
+		objective = mlx.Subtract(linear, penalty)
+	default:
+		logprobs.Free()
+		return nil, nil, fmt.Errorf("unsupported loss function %q", lossFn)
+	}
+	defer objective.Free()
+	weighted := mlx.Multiply(objective, weights)
 	defer weighted.Free()
 	negWeighted := mlx.MultiplyScalar(weighted, float32(-1))
 	defer negWeighted.Free()
-	total := mlx.Sum(negWeighted, false)
-	defer total.Free()
-	weightTotal := mlx.Sum(weights, false)
-	defer weightTotal.Free()
-	loss = mlx.Divide(total, weightTotal)
+	loss = mlx.Sum(negWeighted, false)
 	return loss, logprobs, nil
+}
+
+func denseImportanceSampling(logits, targets, weights, oldLogprobs, advantages *mlx.Array) (loss, logprobs *mlx.Array, err error) {
+	return densePolicyLoss("importance_sampling", logits, targets, weights, oldLogprobs, advantages, policyLossConfig{})
 }
 
 func denseLogprobs(logits, targets *mlx.Array) (*mlx.Array, error) {

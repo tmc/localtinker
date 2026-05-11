@@ -76,7 +76,7 @@ func (c *Client) Capabilities(ctx context.Context) (Capabilities, error) {
 	return Capabilities{
 		Training: true,
 		Sampling: true,
-		Losses:   []string{"cross_entropy", "importance_sampling"},
+		Losses:   []string{"cross_entropy", "importance_sampling", "ppo", "cispo", "dro"},
 	}, nil
 }
 
