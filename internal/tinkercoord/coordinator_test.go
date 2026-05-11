@@ -219,6 +219,12 @@ func TestFutureQueueBoundsConcurrency(t *testing.T) {
 	if snap.Queue.Running != 1 || snap.Queue.Queued != 1 {
 		t.Fatalf("queue = %#v, want one running and one queued", snap.Queue)
 	}
+	if len(snap.Nodes) != 1 {
+		t.Fatalf("nodes = %d, want 1", len(snap.Nodes))
+	}
+	if node := snap.Nodes[0]; node.ID != localNodeID || node.State != "healthy" || node.MaxConcurrency != 1 || node.Running != 1 {
+		t.Fatalf("node = %#v, want local healthy node running one operation", node)
+	}
 	close(releaseFirst)
 	eventuallyFutureState(t, c, first.ID, FutureComplete)
 	eventuallyFutureState(t, c, second.ID, FutureComplete)
@@ -685,6 +691,16 @@ func TestDashboardSnapshotFutureRetryDetails(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.PutNode(context.Background(), tinkerdb.Node{
+		ID:             "node-a",
+		State:          "healthy",
+		MaxConcurrency: 2,
+		Running:        1,
+		StartedAt:      now.Add(-time.Hour),
+		LastSeenAt:     now,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	c := &Coordinator{
 		store:           store,
 		train:           nil,
@@ -700,6 +716,12 @@ func TestDashboardSnapshotFutureRetryDetails(t *testing.T) {
 	}
 	if snap.Queue.Running != 1 || snap.Queue.Queued != 1 || snap.Queue.Retrying != 1 {
 		t.Fatalf("queue = %#v", snap.Queue)
+	}
+	if len(snap.Nodes) != 1 {
+		t.Fatalf("nodes = %d, want 1", len(snap.Nodes))
+	}
+	if node := snap.Nodes[0]; node.ID != "node-a" || node.Running != 1 || node.MaxConcurrency != 2 || !node.LastSeenAt.Equal(now) {
+		t.Fatalf("node = %#v", node)
 	}
 	byID := map[string]DashboardFuture{}
 	for _, future := range snap.Futures {
