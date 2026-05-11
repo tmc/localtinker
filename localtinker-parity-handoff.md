@@ -3,14 +3,17 @@
 Date: 2026-05-11
 Repo: `/Volumes/tmc/go/src/github.com/tmc/localtinker`
 Current local HEAD: run `git rev-parse HEAD`
-Last NotebookLM-audited local HEAD: `55ffaf57994d881cb5c284dbf951648381d1615c`
+Last NotebookLM-audited local HEAD: `3366b6bc6424da8995eb8f46c0de2b86f545f3f8`
 Push: not run
 Notebook ID: `a912d601-badc-409b-bbdb-daf9316b843b`
 
 ## Current Verdict
 
-NotebookLM was refreshed after the docs refresh and reported no remaining
-local implementation or documentation gaps for the documented beta surface.
+NotebookLM was refreshed after the archive invalid-token evidence and reported
+no remaining local implementation or documentation gaps for the documented beta
+surface. After `366e802`, determinism docs were corrected to describe the
+current local loss-function surface. That last docs-only correction still needs
+a NotebookLM refresh when `nlm auth` is available again.
 After a hosted API key was supplied, a follow-up probe pass recorded live hosted
 rows for policy losses, fractional dense weights, sampler output, optimizer
 metrics/resume shape, owner-side archive signed URLs, and raw cancel-future
@@ -18,9 +21,12 @@ route shape. No key or signed URL value was written to artifacts.
 
 Synced notebook sources:
 
-- `repo: localtinker` -> `34ba709e-2ed8-4b88-a786-41b6dcd3079f`
-- `localtinker-sdk-parity-status.md` -> `67500cb9-176e-4909-8338-0b4b279fc93c`
+- `repo: localtinker` -> `e33be21f-6eaf-4710-8e5c-f1d724cbba77`
+- `localtinker-sdk-parity-status.md` -> `dfa9c9fb-7b77-433c-886f-ac9ac29fb00b`
 - `repo: tinker sdk` -> `7c9465b0-2583-48ba-a288-e7ab5ff8e3b2`
+
+Later `nlm source list` attempts hit expired auth. Run `nlm auth` before the
+next NotebookLM refresh.
 
 Closed locally:
 
@@ -36,6 +42,9 @@ Closed locally:
   `cispo`, and `dro` execute locally; policy losses report `loss:sum`.
   Only `cross_entropy` is advertised as hosted-compatible because hosted
   rejects the recorded SDK-shaped policy-loss fixture before metrics.
+- Determinism docs now describe the current local loss-function surface and
+  cite `internal/tinkertrain/mlx.go` for accepted loss names, cross-entropy
+  reduction, policy loss inputs, and loss config parsing.
 - Optimizer metrics/resume comparison. Hosted and local artifacts now cover the
   same cross-entropy `forward_backward`, `optim_step`, TTL-compatible
   `save_state`, and `create_training_client_from_state_with_optimizer` flow.
@@ -94,6 +103,7 @@ GOWORK=off go test ./internal/tinkertrain ./internal/tinkerhttp -run 'TestDatumT
 jq -c . docs/internal/hosted-comparison/20260511-55ffaf5-optimizer-metrics-hosted.jsonl docs/internal/hosted-comparison/20260511-50b2ee8-optimizer-metrics-local.jsonl >/dev/null
 MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOWORK=off go test ./internal/tinkertrain -run 'TestOptimizerStateRoundTrip|TestManagerLoadStateWithOptimizer|TestCheckpointMetadataJSON' -count=1
 MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOWORK=off go test ./internal/tinkerhttp -run 'TestForwardBackwardAndOptimStepTune' -count=1 -timeout=3m
+MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOWORK=off go test ./internal/tinkertrain ./internal/tinkerhttp ./internal/tinkercoord ./tinker -run 'TestDensePolicyLossesReturnWeightedSumAndLogprobs|TestDenseCrossEntropyReturnsWeightedLossAndLogprobs|TestTrainingInputValidation(AcceptsPolicyLossInputs|AcceptsPolicyLossConfig|RejectsPolicyLossConfig|RejectsPolicyLossInputs)$|TestCapabilitiesAdvertiseSamplerConformance|TestCapabilitiesReportHostedCompatibleLosses' -count=1
 ```
 
 The broad `cmd/localtinker` package path can enter the known long-running
@@ -102,10 +112,10 @@ for this parity slice unless the user explicitly asks for a full smoke run.
 
 ## Next Action
 
-Refresh NotebookLM from current `main` after committing this evidence, then ask
-for a strict gap audit. Remaining hosted work needs a valid second principal
-for cross-owner archive denial; the invalid-token control should not be treated
-as a substitute for that probe.
+Run `nlm auth`, refresh NotebookLM from current `main`, then ask for a strict
+gap audit. Remaining hosted work needs a valid second principal for cross-owner
+archive denial; the invalid-token control should not be treated as a substitute
+for that probe.
 
 Do not print secret values. Keep commits local unless the user explicitly asks
 to push.
