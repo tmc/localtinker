@@ -446,6 +446,68 @@ func TestDashboardSnapshotFutureDetails(t *testing.T) {
 	}
 }
 
+func TestDashboardSnapshotFutureRetryDetails(t *testing.T) {
+	now := time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC)
+	store := tinkerdb.OpenMemory()
+	if err := store.PutFuture(context.Background(), tinkerdb.Future{
+		ID:              "fut-running",
+		State:           FutureRunning,
+		CreatedAt:       now.Add(-time.Minute),
+		RequestBytes:    10,
+		Attempt:         2,
+		MaxAttempts:     3,
+		AssignedNodeID:  "node-a",
+		LeaseID:         "lease-a",
+		LeaseExpiresAt:  now.Add(time.Minute),
+		LastHeartbeatAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutFuture(context.Background(), tinkerdb.Future{
+		ID:           "fut-retry",
+		State:        FutureQueued,
+		CreatedAt:    now.Add(-2 * time.Minute),
+		RequestBytes: 20,
+		Attempt:      1,
+		MaxAttempts:  3,
+		NextRunAt:    now.Add(time.Second),
+		RetryReason:  "node_dead",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c := &Coordinator{
+		store:           store,
+		train:           nil,
+		now:             func() time.Time { return now },
+		maxRequestBytes: defaultMaxRequestBytes,
+		maxOperations:   defaultMaxOperations,
+		leaseTimeout:    defaultLeaseTimeout,
+	}
+
+	snap, err := c.DashboardSnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Queue.Running != 1 || snap.Queue.Queued != 1 || snap.Queue.Retrying != 1 {
+		t.Fatalf("queue = %#v", snap.Queue)
+	}
+	byID := map[string]DashboardFuture{}
+	for _, future := range snap.Futures {
+		byID[future.ID] = future
+	}
+	running := byID["fut-running"]
+	if running.Attempt != 2 || running.MaxAttempts != 3 || running.AssignedNodeID != "node-a" || running.LeaseID != "lease-a" {
+		t.Fatalf("running future = %#v", running)
+	}
+	if !running.LeaseExpiresAt.Equal(now.Add(time.Minute)) || !running.LastHeartbeatAt.Equal(now) {
+		t.Fatalf("running times = %#v", running)
+	}
+	retry := byID["fut-retry"]
+	if retry.Attempt != 1 || retry.MaxAttempts != 3 || retry.RetryReason != "node_dead" || !retry.NextRunAt.Equal(now.Add(time.Second)) {
+		t.Fatalf("retry future = %#v", retry)
+	}
+}
+
 func eventuallyFutureState(t *testing.T, c *Coordinator, id, want string) Future {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
