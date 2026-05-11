@@ -224,6 +224,61 @@ func TestFutureQueueBoundsConcurrency(t *testing.T) {
 	eventuallyFutureState(t, c, second.ID, FutureComplete)
 }
 
+func TestEnqueueFutureSetsRetryAttemptsForIdempotentOperations(t *testing.T) {
+	store := tinkerdb.OpenMemory()
+	c, err := New(Config{
+		Store:         store,
+		MaxOperations: 1,
+		LeaseTimeout:  time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	first, err := c.EnqueueFuture(context.Background(), map[string]any{"type": "forward", "model_id": "model-a"}, 1, func(context.Context) (any, error) {
+		<-release
+		return map[string]any{"ok": true}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventuallyStoredState(t, store, first.ID, FutureRunning)
+	second, err := c.EnqueueFuture(context.Background(), map[string]any{"type": "forward_backward", "model_id": "model-a"}, 1, func(context.Context) (any, error) {
+		return map[string]any{"ok": true}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := c.EnqueueFuture(context.Background(), map[string]any{"type": "optim_step", "model_id": "model-a"}, 1, func(context.Context) (any, error) {
+		return map[string]any{"ok": true}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tt := range []struct {
+		name string
+		id   string
+		want int
+	}{
+		{name: "forward", id: first.ID, want: retryMaxAttempts},
+		{name: "forward_backward", id: second.ID, want: retryMaxAttempts},
+		{name: "optim_step", id: third.ID, want: 0},
+	} {
+		got, err := store.GetFuture(context.Background(), tt.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.MaxAttempts != tt.want {
+			t.Fatalf("%s MaxAttempts = %d, want %d", tt.name, got.MaxAttempts, tt.want)
+		}
+	}
+	close(release)
+	eventuallyFutureState(t, c, first.ID, FutureComplete)
+	eventuallyFutureState(t, c, second.ID, FutureComplete)
+	eventuallyFutureState(t, c, third.ID, FutureComplete)
+}
+
 func TestFutureQueueDispatchesFIFO(t *testing.T) {
 	c, err := New(Config{
 		Store:         tinkerdb.OpenMemory(),

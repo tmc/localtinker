@@ -30,6 +30,7 @@ const (
 	defaultMaxOperations   = 1
 	defaultLeaseTimeout    = 30 * time.Second
 	localNodeID            = "local-coordinator"
+	retryMaxAttempts       = 3
 )
 
 type Coordinator struct {
@@ -854,12 +855,22 @@ func (c *Coordinator) EnqueueFuture(ctx context.Context, metadata any, requestBy
 		Operation:    meta.Type,
 		ModelID:      meta.ModelID,
 		RequestBytes: requestBytes,
+		MaxAttempts:  maxAttempts(meta.Type),
 	}
 	if err := c.store.PutFuture(ctx, future); err != nil {
 		return Future{}, err
 	}
 	c.startOperation(id, run)
 	return fromDBFuture(future), nil
+}
+
+func maxAttempts(operation string) int {
+	switch operation {
+	case "forward", "forward_backward":
+		return retryMaxAttempts
+	default:
+		return 0
+	}
 }
 
 func (c *Coordinator) startOperation(id string, run operationFunc) {
