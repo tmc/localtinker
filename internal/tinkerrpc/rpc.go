@@ -34,6 +34,7 @@ const (
 	operationRunning  = "running"
 	operationComplete = "complete"
 	operationFailed   = "failed"
+	operationCanceled = "canceled"
 )
 
 type Server struct {
@@ -81,6 +82,8 @@ type operationState struct {
 	attempts      int
 	lastErrorCode string
 	lastError     string
+	revokePending bool
+	revokeReason  string
 }
 
 type Snapshot struct {
@@ -230,6 +233,35 @@ func (s *Server) EnqueueOperation(kind string, payloadJSON []byte, model *tinker
 	s.operations[id] = op
 	s.operationQueue = append(s.operationQueue, id)
 	return id, nil
+}
+
+// CancelOperation asks the node holding opID's lease to revoke it.
+func (s *Server) CancelOperation(opID, reason string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	op := s.operations[opID]
+	if op == nil {
+		return false
+	}
+	switch op.state {
+	case operationQueued:
+		op.state = operationCanceled
+		op.lastErrorCode = "canceled"
+		op.lastError = reason
+		return true
+	case operationLeased, operationRunning:
+		if reason == "" {
+			reason = "operation canceled"
+		}
+		op.state = operationCanceled
+		op.lastErrorCode = "canceled"
+		op.lastError = reason
+		op.revokePending = true
+		op.revokeReason = reason
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
@@ -445,6 +477,9 @@ func (s *Server) watchCommand(nodeID string) (*tinkerv1.NodeCommand, error) {
 	reason := node.drainReason
 
 	if state == nodeHealthy {
+		if cmd := s.revokeOperationCommandLocked(nodeID); cmd != nil {
+			return cmd, nil
+		}
 		if cmd := s.ackOperationCommandLocked(nodeID); cmd != nil {
 			return cmd, nil
 		}
@@ -463,6 +498,39 @@ func (s *Server) watchCommand(nodeID string) (*tinkerv1.NodeCommand, error) {
 			Drain: &tinkerv1.DrainLease{Reason: reason, Checkpoint: true},
 		},
 	}, nil
+}
+
+func (s *Server) revokeOperationCommandLocked(nodeID string) *tinkerv1.NodeCommand {
+	var selected *operationState
+	for _, op := range s.operations {
+		if op.nodeID != nodeID || !op.revokePending {
+			continue
+		}
+		if selected == nil || op.id < selected.id {
+			selected = op
+		}
+	}
+	if selected == nil {
+		return nil
+	}
+	selected.revokePending = false
+	reason := selected.revokeReason
+	if reason == "" {
+		reason = "operation canceled"
+	}
+	now := s.now().UTC()
+	seq := s.nextSeqLocked()
+	return &tinkerv1.NodeCommand{
+		CommandId:        "revoke-" + selected.id + "-" + strconv.FormatInt(seq, 10),
+		LeaseId:          selected.leaseID,
+		OperationId:      selected.id,
+		Kind:             selected.kind,
+		SeqId:            seq,
+		DeadlineUnixNano: now.Add(30 * time.Second).UnixNano(),
+		Directive: &tinkerv1.NodeCommand_Revoke{
+			Revoke: &tinkerv1.RevokeLease{Reason: reason},
+		},
+	}
 }
 
 func (s *Server) ackOperationCommandLocked(nodeID string) *tinkerv1.NodeCommand {
@@ -686,6 +754,14 @@ func (s *Server) operationTerminalLocked(event *tinkerv1.NodeEvent) {
 	op.completedAt = s.eventTime(event)
 	op.deadline = time.Time{}
 	op.ackPending = true
+	if op.state == operationCanceled {
+		op.state = operationFailed
+		op.lastErrorCode = "canceled"
+		if op.lastError == "" {
+			op.lastError = "operation canceled"
+		}
+		return
+	}
 	if failed := event.GetFailed(); failed != nil {
 		op.state = operationFailed
 		if err := failed.GetError(); err != nil {
