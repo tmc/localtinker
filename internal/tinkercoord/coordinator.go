@@ -1028,10 +1028,7 @@ func (c *Coordinator) RetrieveFuture(ctx context.Context, id string, allowMetada
 		return Future{}, err
 	}
 	if future.State == FutureRunning && !future.LeaseExpiresAt.IsZero() && !future.LeaseExpiresAt.After(c.now().UTC()) {
-		if err := c.finishFuture(ctx, future, nil, map[string]any{
-			"code":    "system_error",
-			"message": "operation lease expired",
-		}, FutureSystemError); err != nil {
+		if err := c.expireFutureLease(ctx, future); err != nil {
 			return Future{}, err
 		}
 		future, err = c.store.GetFuture(ctx, id)
@@ -1058,6 +1055,23 @@ func (c *Coordinator) RetrieveFuture(ctx context.Context, id string, allowMetada
 		out.State = FutureTryAgain
 	}
 	return out, nil
+}
+
+func (c *Coordinator) expireFutureLease(ctx context.Context, future tinkerdb.Future) error {
+	if future.LeaseID != "" && future.MaxAttempts > 0 && future.Attempt < future.MaxAttempts {
+		now := c.now().UTC()
+		_, ok, err := c.store.RequeueFuture(ctx, future.ID, future.LeaseID, "operation lease expired", now, now)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return nil
+		}
+	}
+	return c.finishFuture(ctx, future, nil, map[string]any{
+		"code":    "system_error",
+		"message": "operation lease expired",
+	}, FutureSystemError)
 }
 
 func (c *Coordinator) CancelFuture(ctx context.Context, id string) (Future, error) {
