@@ -223,13 +223,14 @@ Goal: keep local behavior honest against hosted Tinker.
 
 ## Next Milestones
 
-1. Probe hosted private cross-owner archive denial with a second hosted
+1. Probe hosted scheduler timing and operation-level backpressure.
+2. Probe hosted private cross-owner archive denial with a second hosted
    principal.
-2. Revisit policy-loss capability advertising only if hosted starts accepting
+3. Revisit policy-loss capability advertising only if hosted starts accepting
    the recorded SDK-shaped TensorData fixture.
-3. MLX library setup (`MLX_LIB_PATH`) for clean checkouts is documented in
+4. MLX library setup (`MLX_LIB_PATH`) for clean checkouts is documented in
    `docs/mlx-setup.md` and referenced from the README.
-4. Deterministic sampler tests over a small cached model: covered by
+5. Deterministic sampler tests over a small cached model: covered by
    `TestSampleDeterministicSmallCachedModel`,
    `TestSampleDeterministicRepeats`, and `TestSampleDeterministicPrefix`
    in `internal/tinkertrain/sample_test.go`. They skip cleanly when
