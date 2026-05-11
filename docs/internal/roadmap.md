@@ -189,11 +189,15 @@ Goal: keep local behavior honest against hosted Tinker.
 
 ## Known Gaps
 
-- Hosted scheduler timing and operation-level backpressure are local-only
-  evidence so far. Local queue/cancel behavior is pinned, and
+- Hosted scheduler timing and operation-level backpressure are now recorded for
+  the two-future fixture. Local queue/cancel behavior is pinned, and
   `docs/internal/hosted-comparison/20260511-55ffaf5-cancel-future-hosted.jsonl`
   records hosted raw `/api/v1/cancel_future` returning 404 for the request
   shapes localtinker accepts.
+  `docs/internal/hosted-comparison/20260511-f06603b-queue-backpressure-hosted.jsonl`
+  records hosted raw `forward_backward` pair submission returning 202 with
+  distinct request IDs and metadata-only `retrieve_future` returning
+  `queue_state:"active"` for both futures across the probe window.
 - Policy losses `importance_sampling`, `ppo`, `cispo`, and `dro` execute
   locally and are covered by local JSONL rows. Live hosted evidence in
   `docs/internal/hosted-comparison/20260511-55ffaf5-policy-losses-hosted.jsonl`
@@ -223,14 +227,13 @@ Goal: keep local behavior honest against hosted Tinker.
 
 ## Next Milestones
 
-1. Probe hosted scheduler timing and operation-level backpressure.
-2. Probe hosted private cross-owner archive denial with a second hosted
+1. Probe hosted private cross-owner archive denial with a second hosted
    principal.
-3. Revisit policy-loss capability advertising only if hosted starts accepting
+2. Revisit policy-loss capability advertising only if hosted starts accepting
    the recorded SDK-shaped TensorData fixture.
-4. MLX library setup (`MLX_LIB_PATH`) for clean checkouts is documented in
+3. MLX library setup (`MLX_LIB_PATH`) for clean checkouts is documented in
    `docs/mlx-setup.md` and referenced from the README.
-5. Deterministic sampler tests over a small cached model: covered by
+4. Deterministic sampler tests over a small cached model: covered by
    `TestSampleDeterministicSmallCachedModel`,
    `TestSampleDeterministicRepeats`, and `TestSampleDeterministicPrefix`
    in `internal/tinkertrain/sample_test.go`. They skip cleanly when

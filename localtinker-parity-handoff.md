@@ -48,7 +48,6 @@ Closed locally:
 
 Open hosted/comparison gaps:
 
-- Hosted scheduler timing and operation backpressure.
 - Hosted private cross-owner archive denial, requiring a second principal.
 
 ## Evidence Artifacts
@@ -58,6 +57,7 @@ Current in-repo artifacts:
 - `docs/internal/hosted-comparison/20260511-0480f94-policy-losses-hosted-local.jsonl`
 - `docs/internal/hosted-comparison/20260511-0480f94-cancel-future-local.jsonl`
 - `docs/internal/hosted-comparison/20260511-0480f94-queue-backpressure-local.jsonl`
+- `docs/internal/hosted-comparison/20260511-f06603b-queue-backpressure-hosted.jsonl`
 - `docs/internal/hosted-comparison/20260511-0480f94-archive-auth-signed-url-local.jsonl`
 - `docs/internal/hosted-comparison/20260508-e51c8f6-archive-visibility-local.jsonl`
 - `docs/internal/hosted-comparison/20260508-e51c8f6-fractional-weights-local.jsonl`
@@ -100,9 +100,8 @@ for this parity slice unless the user explicitly asks for a full smoke run.
 ## Next Action
 
 Refresh NotebookLM from current `main` after committing this evidence, then ask
-for a strict gap audit. Remaining hosted work needs a credentialed
-queue/backpressure timing probe and a second principal for cross-owner archive
-denial.
+for a strict gap audit. Remaining hosted work needs a second principal for
+cross-owner archive denial.
 
 Do not print secret values. Keep commits local unless the user explicitly asks
 to push.
