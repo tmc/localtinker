@@ -553,7 +553,7 @@ func firstInput(a, b tinkertrain.ForwardBackwardInput) tinkertrain.ForwardBackwa
 
 func normalizeAndValidateInput(input *tinkertrain.ForwardBackwardInput) error {
 	switch input.LossFn {
-	case "cross_entropy", "importance_sampling", "ppo", "cispo":
+	case "cross_entropy", "importance_sampling":
 	default:
 		return fmt.Errorf("unsupported loss function %q", input.LossFn)
 	}
@@ -592,7 +592,7 @@ func lossInputKeyAllowed(lossFn, name string) bool {
 	switch lossFn {
 	case "cross_entropy":
 		return name == "target_tokens" || name == "weights"
-	case "importance_sampling", "ppo", "cispo":
+	case "importance_sampling":
 		switch name {
 		case "target_tokens", "weights", "logprobs", "advantages":
 			return true
@@ -608,25 +608,6 @@ func validateLossFnConfig(lossFn string, config map[string]float64) error {
 	switch lossFn {
 	case "cross_entropy":
 		return nil
-	case "ppo", "cispo":
-		for name, v := range config {
-			switch name {
-			case "clip_low_threshold", "clip_high_threshold":
-				if math.IsNaN(v) || math.IsInf(v, 0) {
-					return fmt.Errorf("loss_fn_config[%q] = %v is not finite", name, v)
-				}
-				if v <= 0 {
-					return fmt.Errorf("loss_fn_config[%q] = %v is not positive", name, v)
-				}
-			default:
-				return fmt.Errorf("unsupported loss_fn_config key %q for %s", name, lossFn)
-			}
-		}
-		low, hasLow := config["clip_low_threshold"]
-		high, hasHigh := config["clip_high_threshold"]
-		if hasLow && hasHigh && low > high {
-			return fmt.Errorf("clip_low_threshold %v exceeds clip_high_threshold %v", low, high)
-		}
 	default:
 		for name := range config {
 			return fmt.Errorf("unsupported loss_fn_config key %q for %s", name, lossFn)
@@ -716,7 +697,7 @@ func validateLossDatum(lossFn string, i int, datum tinkertrain.Datum) error {
 
 func policyLoss(lossFn string) bool {
 	switch lossFn {
-	case "importance_sampling", "ppo", "cispo":
+	case "importance_sampling":
 		return true
 	}
 	return false
