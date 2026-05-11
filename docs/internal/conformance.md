@@ -165,7 +165,7 @@ limited public beta only if the caveats below are stated plainly.
 | Hosted comparison | `hosted comparison fixture` records hosted-vs-local checkpoint, optimizer-resume, metrics, and sampler shape evidence. `hosted comparison fixture` records custom-loss shape evidence. `hosted comparison fixture` records dense cross-entropy shape and loss evidence. The `20260511-0480f94-*` artifacts add current local policy-loss, cancel-future, queue-backpressure, and archive authorization evidence. | Covered for recorded shapes; numeric and hosted-credential-gated differences remain caveats. |
 | Checkpoint downloads | Local HTTP archive URLs and metadata are covered. `hosted comparison fixture` records the current local route shape and hosted credential blocker. Hosted signed URL and cross-owner authorization behavior are not matched. | Disclose for beta; blocker for hosted-compatible wording. |
 | Futures and queueing | Local queue, cancellation, panic containment, unfinished-queue recovery, and local queue backpressure timing are covered. `hosted comparison fixture` records the local cancel route and SDK retrieve-only surface. `hosted comparison fixture` records the local one-slot queue case and the hosted credential blocker. | Disclose until hosted cancellation and queue timing can be probed. |
-| Cross-entropy | Dense tensors, invalid weights, sparse tensor rejection, and logprobs are covered locally. `hosted comparison fixture` records matching hosted/local per-token logprob shapes and a forward loss mean difference. | Beta-ready with numeric caveats. |
+| Cross-entropy | Dense tensors, CSR `target_tokens`/`weights` rehydration, unsupported sparse tensor rejection, invalid weights, and logprobs are covered locally. `hosted comparison fixture` records matching hosted/local per-token logprob shapes and a forward loss mean difference. | Beta-ready with numeric caveats. |
 | Custom losses | `hosted comparison fixture` records hosted and local `forward_backward_custom` success and `custom_loss:mean` metric shape evidence. | Beta-ready with numeric caveats. |
 | Sampling | Generated logprobs, prompt logprobs, deterministic seed flow, string stops, and top-k prompt logprob shapes are covered locally and in hosted comparison rows. | Beta-ready with numeric/distribution caveats. |
 | Packaging | Clean-checkout `MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./...`; latest recorded pass: `65f4c6e`. | Beta-ready; rerun before any release commit. |
@@ -223,8 +223,14 @@ probe is on record. Evidence reviewed 2026-05-11.
   records local `forward` and `forward_backward` rows for all four policy
   losses, plus hosted blocker rows because no hosted `TINKER_API_KEY` or
   `TINKER_BASE_URL` was available in this environment.
-- Sparse `TensorData` inputs are rejected; only dense tensor inputs are
-  supported. Local-only contract; no hosted probe recorded.
+- CSR sparse `target_tokens` and `weights` are accepted and rehydrated to
+  dense tensors in both the direct Go API and HTTP path. Pinned by
+  `internal/tinkertrain.TestDatumTargetsRehydratesSparse`,
+  `internal/tinkertrain.TestDatumWeightsRehydratesSparse`, and
+  `internal/tinkerhttp.TestNormalizeTensorDataRehydratesNamedSparse`.
+  Sparse tensors for unsupported names (for example `advantages` or
+  policy-loss `logprobs`) are rejected before MLX execution. Local-only
+  contract; no hosted probe recorded.
 - Arbitrary non-prefix fractional dense weights (e.g. `[0.25, 1, 0, 0.75]`
   or `[1, 0, 0.3, 0, 0.7, 1]`) are accepted by `newDenseBatch` and
   `denseCrossEntropy` returns the weighted mean
