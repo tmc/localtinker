@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -662,6 +663,140 @@ func TestTrainingInputValidationAcceptsDenseCrossEntropy(t *testing.T) {
 	weight := input.Data[0].LossFnInputs["weights"]
 	if weight.DType != "float32" || !sameShape(weight.Shape, []int{2, 2}) {
 		t.Fatalf("weight tensor = %#v", weight)
+	}
+}
+
+func TestTrainingInputValidationAcceptsPolicyLossInputs(t *testing.T) {
+	input := policyLossValidationInput("importance_sampling")
+	if err := normalizeAndValidateInput(&input); err != nil {
+		t.Fatal(err)
+	}
+	datum := input.Data[0]
+	if got := datum.LossFnInputs["target_tokens"]; got.DType != "int64" || !sameShape(got.Shape, []int{2, 2}) {
+		t.Fatalf("target_tokens = %#v", got)
+	}
+	for _, name := range []string{"weights", "logprobs", "advantages"} {
+		got := datum.LossFnInputs[name]
+		if got.DType != "float32" || !sameShape(got.Shape, []int{2, 2}) {
+			t.Fatalf("%s = %#v", name, got)
+		}
+	}
+}
+
+func TestTrainingInputValidationRejectsPolicyLossInputs(t *testing.T) {
+	tests := []struct {
+		name   string
+		lossFn string
+		edit   func(*tinkertrain.ForwardBackwardInput)
+		want   string
+	}{
+		{
+			name:   "missing logprobs",
+			lossFn: "importance_sampling",
+			edit: func(in *tinkertrain.ForwardBackwardInput) {
+				delete(in.Data[0].LossFnInputs, "logprobs")
+			},
+			want: "missing logprobs for importance_sampling",
+		},
+		{
+			name:   "bad logprobs length",
+			lossFn: "importance_sampling",
+			edit: func(in *tinkertrain.ForwardBackwardInput) {
+				in.Data[0].LossFnInputs["logprobs"] = tinkertrain.TensorData{Data: []float64{-1, -2}, DType: "float32"}
+			},
+			want: "logprobs length 2 does not match target_tokens length 4",
+		},
+		{
+			name:   "bad advantages shape",
+			lossFn: "importance_sampling",
+			edit: func(in *tinkertrain.ForwardBackwardInput) {
+				in.Data[0].LossFnInputs["advantages"] = tinkertrain.TensorData{
+					Data:  []float64{1, 1, 1, 1},
+					DType: "float32",
+					Shape: []int{4},
+				}
+			},
+			want: "advantages shape [4] does not match target_tokens shape [2 2]",
+		},
+		{
+			name:   "non finite advantages",
+			lossFn: "importance_sampling",
+			edit: func(in *tinkertrain.ForwardBackwardInput) {
+				in.Data[0].LossFnInputs["advantages"] = tinkertrain.TensorData{
+					Data:  []float64{1, math.Inf(1), 1, 1},
+					DType: "float32",
+					Shape: []int{2, 2},
+				}
+			},
+			want: "is not finite",
+		},
+		{
+			name:   "unsupported policy key",
+			lossFn: "importance_sampling",
+			edit: func(in *tinkertrain.ForwardBackwardInput) {
+				in.Data[0].LossFnInputs["mask"] = tinkertrain.TensorData{Data: []float64{1, 1, 1, 1}, DType: "float32"}
+			},
+			want: `unsupported loss_fn_inputs key "mask" for importance_sampling`,
+		},
+		{
+			name:   "clip threshold is config not input tensor",
+			lossFn: "importance_sampling",
+			edit: func(in *tinkertrain.ForwardBackwardInput) {
+				in.Data[0].LossFnInputs["clip_low_threshold"] = tinkertrain.TensorData{Data: []float64{0.8}, DType: "float32"}
+			},
+			want: `unsupported loss_fn_inputs key "clip_low_threshold" for importance_sampling`,
+		},
+		{
+			name:   "unsupported config key",
+			lossFn: "importance_sampling",
+			edit: func(in *tinkertrain.ForwardBackwardInput) {
+				in.LossFnConfig = map[string]float64{"beta": 0.1}
+			},
+			want: `unsupported loss_fn_config key "beta" for importance_sampling`,
+		},
+		{
+			name:   "importance sampling has no clip config",
+			lossFn: "importance_sampling",
+			edit: func(in *tinkertrain.ForwardBackwardInput) {
+				in.LossFnConfig = map[string]float64{"clip_low_threshold": 0.8}
+			},
+			want: `unsupported loss_fn_config key "clip_low_threshold" for importance_sampling`,
+		},
+		{
+			name:   "dro remains unsupported",
+			lossFn: "dro",
+			want:   `unsupported loss function "dro"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := policyLossValidationInput(tt.lossFn)
+			if tt.edit != nil {
+				tt.edit(&input)
+			}
+			err := normalizeAndValidateInput(&input)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func policyLossValidationInput(lossFn string) tinkertrain.ForwardBackwardInput {
+	return tinkertrain.ForwardBackwardInput{
+		LossFn: lossFn,
+		Data: []tinkertrain.Datum{{
+			ModelInput: tinkertrain.ModelInput{Chunks: []tinkertrain.ModelInputChunk{{
+				Type:   "encoded_text",
+				Tokens: []int{10, 11, 12, 13},
+			}}},
+			LossFnInputs: map[string]tinkertrain.TensorData{
+				"target_tokens": {Data: []float64{30, 31, 32, 33}, DType: "int64", Shape: []int{2, 2}},
+				"weights":       {Data: []float64{1, 0.5, 0, 1}, DType: "float32", Shape: []int{2, 2}},
+				"logprobs":      {Data: []float64{-1, -1.5, -2, -2.5}, DType: "float32", Shape: []int{2, 2}},
+				"advantages":    {Data: []float64{1, -1, 0.25, 0.5}, DType: "float32", Shape: []int{2, 2}},
+			},
+		}},
 	}
 }
 

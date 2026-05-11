@@ -317,3 +317,31 @@ func TestCreateLoRAAndClose(t *testing.T) {
 		t.Fatalf("Info after Close error = %v, want ErrClosed", err)
 	}
 }
+
+func TestCapabilitiesReportExecutableLosses(t *testing.T) {
+	ctx := context.Background()
+	client, err := New(Config{
+		RootDir: t.TempDir(),
+		Models: registry{"m": {
+			Name:       "m",
+			Path:       "/tmp/m",
+			MaxContext: 16,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	caps, err := client.Capabilities(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"cross_entropy", "importance_sampling"}
+	if len(caps.Losses) != len(want) {
+		t.Fatalf("Losses = %v, want %v", caps.Losses, want)
+	}
+	for i := range want {
+		if caps.Losses[i] != want[i] {
+			t.Fatalf("Losses = %v, want %v", caps.Losses, want)
+		}
+	}
+}
