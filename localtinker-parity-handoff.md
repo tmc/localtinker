@@ -3,7 +3,7 @@
 Date: 2026-05-11
 Repo: `/Volumes/tmc/go/src/github.com/tmc/localtinker`
 Current local HEAD: run `git rev-parse HEAD`
-Last NotebookLM-audited local HEAD: `a83ec41a61356bfdc2122829eacadbcafe50c3da`
+Last NotebookLM-audited local HEAD: `55ffaf57994d881cb5c284dbf951648381d1615c`
 Push: not run
 Notebook ID: `a912d601-badc-409b-bbdb-daf9316b843b`
 
@@ -11,6 +11,10 @@ Notebook ID: `a912d601-badc-409b-bbdb-daf9316b843b`
 
 NotebookLM was refreshed after the docs refresh and reported no remaining
 local implementation or documentation gaps for the documented beta surface.
+After a hosted API key was supplied, a follow-up probe pass recorded live hosted
+rows for policy losses, fractional dense weights, sampler output, optimizer
+metrics/resume shape, owner-side archive signed URLs, and raw cancel-future
+route shape. No key or signed URL value was written to artifacts.
 
 Synced notebook sources:
 
@@ -35,26 +39,16 @@ Closed locally:
 - Local queue, cancel, checkpoint archive metadata, and archive visibility
   behavior are covered by focused tests and JSONL artifacts.
 
-Open hosted-evidence gaps:
+Open hosted/comparison gaps:
 
-- Policy loss response shapes for hosted `importance_sampling`, `ppo`, `cispo`,
-  and `dro`.
-- Hosted response shape and metrics for arbitrary non-prefix fractional dense
-  weights.
-- Hosted cancel future behavior.
 - Hosted scheduler timing and operation backpressure.
-- Hosted checkpoint signed URL shape and private cross-owner archive denial.
-- Hosted/local sampler distribution comparison.
-- Hosted/local optimizer metrics and resume equivalence.
-
-These are blocked in the current shell because no hosted credential source is
-available:
-
-- `TINKER_API_KEY` is absent.
-- `TINKER_BASE_URL` is absent.
-- `TINKER_CREDENTIAL_CMD` is absent.
-- Candidate second-principal variables for archive auth are absent.
-- Keychain and local password-manager checks did not find a usable credential.
+- Hosted private cross-owner archive denial, requiring a second principal.
+- Same-model local-vs-hosted sampler distribution comparison.
+- Exact local-vs-hosted optimizer numeric equivalence after `optim_step`.
+- Policy-loss capability semantics: local executes `importance_sampling`,
+  `ppo`, `cispo`, and `dro`, but hosted at `55ffaf5` rejects the same
+  SDK-shaped TensorData fixture before metrics with
+  `could_not_convert_loss_function_inputs_to_array_record`.
 
 ## Evidence Artifacts
 
@@ -66,6 +60,12 @@ Current in-repo artifacts:
 - `docs/internal/hosted-comparison/20260511-0480f94-archive-auth-signed-url-local.jsonl`
 - `docs/internal/hosted-comparison/20260508-e51c8f6-archive-visibility-local.jsonl`
 - `docs/internal/hosted-comparison/20260508-e51c8f6-fractional-weights-local.jsonl`
+- `docs/internal/hosted-comparison/20260511-55ffaf5-policy-losses-hosted.jsonl`
+- `docs/internal/hosted-comparison/20260511-55ffaf5-fractional-weights-hosted.jsonl`
+- `docs/internal/hosted-comparison/20260511-55ffaf5-sampler-distribution-hosted.jsonl`
+- `docs/internal/hosted-comparison/20260511-55ffaf5-optimizer-metrics-hosted.jsonl`
+- `docs/internal/hosted-comparison/20260511-55ffaf5-archive-auth-signed-url-hosted.jsonl`
+- `docs/internal/hosted-comparison/20260511-55ffaf5-cancel-future-hosted.jsonl`
 
 Coordinator handoffs:
 
@@ -91,27 +91,23 @@ The broad `cmd/localtinker` package path can enter the known long-running
 `sdk_custom_loss.py` smoke path. Use the focused SDK malformed-input gate above
 for this parity slice unless the user explicitly asks for a full smoke run.
 
-## Next Action When Credentials Exist
+## Next Action
 
-Run `docs/internal/hosted-probes.md`.
+Refresh NotebookLM from current `main` after committing this evidence, then ask
+for a strict gap audit. Remaining hosted work needs either a second principal
+for cross-owner archive denial or a paired local run for same-model sampler and
+optimizer numeric comparisons.
 
-Do not print secret values. Record only scrubbed hosted metadata in JSONL. Keep
-commits local unless the user explicitly asks to push.
+Do not print secret values. Keep commits local unless the user explicitly asks
+to push.
 
 ## Worktree Cleanup
 
 Main worktree was clean after the latest handoff refresh.
 
-One leftover worktree remains:
-
-- `/Volumes/tmc/go/src/github.com/tmc/localtinker-wt-betadocs`
-- branch: `parity-beta-docs`
-- no commits ahead of `main`
-- dirty files:
-  - `docs/internal/conformance.md`
-  - `docs/internal/roadmap.md`
-  - `localtinker-parity-handoff.md`
-
-The dirty diff was preserved at
-`/tmp/localtinker-wt-betadocs-dirty-20260511T051213Z.patch`. The worktree was
-not removed because deleting it would discard uncommitted worker-owned edits.
+The stale worktree `/Volumes/tmc/go/src/github.com/tmc/localtinker-wt-betadocs`
+was removed after preserving its dirty diff at
+`/tmp/localtinker-wt-betadocs-dirty-20260511T051213Z.patch`.
+The branch `parity-beta-docs` was deleted with `git branch -d`; it had no
+commits ahead of `main`. The preserved diff is stale relative to `55ffaf5` and
+should be treated only as recovery evidence.

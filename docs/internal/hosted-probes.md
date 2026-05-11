@@ -7,8 +7,12 @@ Required inputs:
 
 ```sh
 export TINKER_API_KEY=...
-export TINKER_BASE_URL=...
 ```
+
+The current Python SDK defaults to
+`https://tinker.thinkingmachines.dev/services/tinker-prod` when
+`TINKER_BASE_URL` is unset. Set `TINKER_BASE_URL` only when probing a different
+hosted deployment.
 
 Checkpoint archive cross-owner denial also requires a second hosted principal:
 
@@ -35,13 +39,11 @@ jq -c . docs/internal/hosted-comparison/*.jsonl >/dev/null
 
 | Gap | Artifact | Required hosted input |
 | --- | --- | --- |
-| Fractional dense weights | `docs/internal/hosted-comparison/20260508-e51c8f6-fractional-weights-local.jsonl` or successor artifact | `TINKER_API_KEY`, `TINKER_BASE_URL` |
-| Policy losses | `docs/internal/hosted-comparison/20260511-0480f94-policy-losses-hosted-local.jsonl` | `TINKER_API_KEY`, `TINKER_BASE_URL` |
-| Cancel futures | `docs/internal/hosted-comparison/20260511-0480f94-cancel-future-local.jsonl` or successor artifact | `TINKER_API_KEY`, `TINKER_BASE_URL` |
-| Queue/backpressure | `docs/internal/hosted-comparison/20260511-0480f94-queue-backpressure-local.jsonl` or successor artifact | `TINKER_API_KEY`, `TINKER_BASE_URL` |
-| Checkpoint archive signed URL/auth | `docs/internal/hosted-comparison/20260511-0480f94-archive-auth-signed-url-local.jsonl` or successor artifact | `TINKER_API_KEY`, `TINKER_BASE_URL`, second principal |
-| Sampler distribution | `docs/internal/hosted-comparison/YYYYMMDD-<short-head>-sampler-distribution-hosted-local.jsonl` | `TINKER_API_KEY`, `TINKER_BASE_URL` |
-| Optimizer metrics | `docs/internal/hosted-comparison/YYYYMMDD-<short-head>-optimizer-metrics-hosted-local.jsonl` | `TINKER_API_KEY`, `TINKER_BASE_URL` |
+| Queue/backpressure | `docs/internal/hosted-comparison/20260511-0480f94-queue-backpressure-local.jsonl` or successor artifact | `TINKER_API_KEY` |
+| Checkpoint archive cross-owner denial | `docs/internal/hosted-comparison/20260511-55ffaf5-archive-auth-signed-url-hosted.jsonl` or successor artifact | `TINKER_API_KEY`, second principal |
+| Same-model sampler distribution comparison | `docs/internal/hosted-comparison/20260511-55ffaf5-sampler-distribution-hosted.jsonl` plus local successor artifact | `TINKER_API_KEY` for hosted, local MLX model cache for paired local |
+| Optimizer numeric equivalence | `docs/internal/hosted-comparison/20260511-55ffaf5-optimizer-metrics-hosted.jsonl` plus local successor artifact | `TINKER_API_KEY` for hosted, local MLX model cache for paired local |
+| Policy-loss capability decision | `docs/internal/hosted-comparison/20260511-55ffaf5-policy-losses-hosted.jsonl` | No more hosted input; decide whether local should keep advertising policy losses that hosted rejects for the recorded fixture |
 
 ## Artifact Rules
 

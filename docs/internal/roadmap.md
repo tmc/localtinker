@@ -189,40 +189,44 @@ Goal: keep local behavior honest against hosted Tinker.
 
 ## Known Gaps
 
-- Hosted scheduler timing, operation-level backpressure, and cancellation are
-  local-only or SDK-surface evidence so far. Local queue/cancel behavior is
-  pinned, and `docs/internal/hosted-comparison/20260511-0480f94-{cancel-future,queue-backpressure}-local.jsonl`
-  records the hosted credential blocker.
+- Hosted scheduler timing and operation-level backpressure are local-only
+  evidence so far. Local queue/cancel behavior is pinned, and
+  `docs/internal/hosted-comparison/20260511-55ffaf5-cancel-future-hosted.jsonl`
+  records hosted raw `/api/v1/cancel_future` returning 404 for the request
+  shapes localtinker accepts.
 - Policy losses `importance_sampling`, `ppo`, `cispo`, and `dro` execute
-  locally and are covered by local JSONL rows. Hosted policy-loss evidence is
-  still blocked on `TINKER_API_KEY` and `TINKER_BASE_URL`.
-- Arbitrary non-prefix fractional dense weights execute locally and are
-  covered by local JSONL rows. Hosted evidence for the same fractional input
-  remains blocked on `TINKER_API_KEY` and `TINKER_BASE_URL`.
+  locally and are covered by local JSONL rows. Live hosted evidence in
+  `docs/internal/hosted-comparison/20260511-55ffaf5-policy-losses-hosted.jsonl`
+  shows the same SDK-shaped TensorData fixture fails before metrics with
+  `could_not_convert_loss_function_inputs_to_array_record`.
+- Arbitrary non-prefix fractional dense weights execute locally and on hosted.
+  `docs/internal/hosted-comparison/20260511-55ffaf5-fractional-weights-hosted.jsonl`
+  records hosted success for `[0.25, 1, 0, 0.75]`; hosted reports `loss:sum`,
+  while local cross-entropy reports `loss:mean`.
 - Checkpoint archive URLs are local HTTP download URLs. Local owner,
-  visibility, expiration, and private/public state are pinned, but hosted
-  signed URL shape and cross-owner authorization evidence require hosted
-  credentials plus a second principal token.
-- Hosted numerics and local MLX numerics will differ. Sampler distribution and
-  optimizer metric equivalence remain hosted-evidence gaps, not local
-  implementation gaps.
+  visibility, expiration, and private/public state are pinned. Hosted owner
+  signed URL shape is recorded in
+  `docs/internal/hosted-comparison/20260511-55ffaf5-archive-auth-signed-url-hosted.jsonl`,
+  but cross-owner authorization evidence still requires a second principal
+  token.
+- Hosted numerics and local MLX numerics will differ. Hosted sampler rows and
+  hosted optimizer metrics/resume shape are now recorded at `55ffaf5`, but
+  same-model local sampler distribution and exact optimizer numeric
+  equivalence remain comparison gaps, not local implementation gaps.
 
 ## Next Milestones
 
-1. When hosted credentials are available, run the hosted probes in
-   `docs/internal/hosted-probes.md` and replace blocker rows with real hosted
-   evidence rows.
-2. Submit the hosted fractional dense-weight fixture and compare response
-   shape plus `loss_fn_outputs.weights`/loss metrics against the local row.
-3. Compare hosted/local sampler distributions across fixed prompts, seeds,
+1. Compare hosted/local sampler distributions across fixed prompts, seeds,
    temperature, top-p, and top-k.
-4. Compare hosted/local optimizer metrics and resume behavior after
+2. Compare hosted/local optimizer metrics and resume behavior after
    `optim_step`.
-5. Probe hosted checkpoint signed URL shape and private cross-owner archive
-   denial with a second hosted principal.
-6. MLX library setup (`MLX_LIB_PATH`) for clean checkouts is documented in
+3. Probe hosted private cross-owner archive denial with a second hosted
+   principal.
+4. Decide whether local policy-loss capability advertising should remain
+   broader than the hosted behavior recorded at `55ffaf5`.
+5. MLX library setup (`MLX_LIB_PATH`) for clean checkouts is documented in
    `docs/mlx-setup.md` and referenced from the README.
-7. Deterministic sampler tests over a small cached model: covered by
+6. Deterministic sampler tests over a small cached model: covered by
    `TestSampleDeterministicSmallCachedModel`,
    `TestSampleDeterministicRepeats`, and `TestSampleDeterministicPrefix`
    in `internal/tinkertrain/sample_test.go`. They skip cleanly when

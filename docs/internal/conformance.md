@@ -163,12 +163,12 @@ limited public beta only if the caveats below are stated plainly.
 | Area | Status | Publicization decision |
 | --- | --- | --- |
 | SDK route surface | Meaningful local coverage exists for sessions, futures, training, checkpoints, sampler flows, malformed inputs, and REST listings. | Beta-ready with the covered surface named. |
-| Hosted comparison | `docs/internal/hosted-comparison/20260505-a995c00-hosted-local.jsonl` records hosted-vs-local checkpoint, optimizer-resume, metrics, and sampler shape evidence. `docs/internal/hosted-comparison/20260505-ecc480f-custom-loss-hosted-local.jsonl` records custom-loss shape evidence. `docs/internal/hosted-comparison/20260505-497eb1c-ce-hosted-local.jsonl` records dense cross-entropy shape and loss evidence. The `20260511-0480f94-*` artifacts add current local policy-loss, cancel-future, queue-backpressure, and archive authorization evidence. | Covered for recorded shapes; numeric and hosted-credential-gated differences remain caveats. |
-| Checkpoint downloads | Local HTTP archive URLs and metadata are covered. `docs/internal/hosted-comparison/20260511-0480f94-archive-auth-signed-url-local.jsonl` records the current local route shape and hosted credential blocker. Hosted signed URL and cross-owner authorization behavior are not matched. | Disclose for beta; blocker for hosted-compatible wording. |
-| Futures and queueing | Local queue, cancellation, panic containment, unfinished-queue recovery, and local queue backpressure timing are covered. `docs/internal/hosted-comparison/20260511-0480f94-cancel-future-local.jsonl` records the local cancel route and SDK retrieve-only surface. `docs/internal/hosted-comparison/20260511-0480f94-queue-backpressure-local.jsonl` records the local one-slot queue case and the hosted credential blocker. | Disclose until hosted cancellation and queue timing can be probed. |
-| Cross-entropy | Dense tensors, CSR `target_tokens`/`weights` rehydration, unsupported sparse tensor rejection, invalid weights, and logprobs are covered locally. `docs/internal/hosted-comparison/20260505-497eb1c-ce-hosted-local.jsonl` records matching hosted/local per-token logprob shapes and a forward loss mean difference. | Beta-ready with numeric caveats. |
+| Hosted comparison | `docs/internal/hosted-comparison/20260505-a995c00-hosted-local.jsonl` records hosted-vs-local checkpoint, optimizer-resume, metrics, and sampler shape evidence. `docs/internal/hosted-comparison/20260505-ecc480f-custom-loss-hosted-local.jsonl` records custom-loss shape evidence. `docs/internal/hosted-comparison/20260505-497eb1c-ce-hosted-local.jsonl` records dense cross-entropy shape and loss evidence. The `20260511-0480f94-*` artifacts add current local policy-loss, cancel-future, queue-backpressure, and archive authorization evidence. The `20260511-55ffaf5-*` hosted artifacts replace several credential blockers with live hosted observations. | Covered for recorded shapes; numeric differences and policy-loss behavior remain caveats. |
+| Checkpoint downloads | Local HTTP archive URLs and metadata are covered. `docs/internal/hosted-comparison/20260511-0480f94-archive-auth-signed-url-local.jsonl` records the current local route shape. `docs/internal/hosted-comparison/20260511-55ffaf5-archive-auth-signed-url-hosted.jsonl` records hosted owner signed-URL shape for sampler weights. Hosted cross-owner authorization still needs a second principal. | Disclose for beta; blocker for hosted-compatible wording. |
+| Futures and queueing | Local queue, cancellation, panic containment, unfinished-queue recovery, and local queue backpressure timing are covered. `docs/internal/hosted-comparison/20260511-0480f94-cancel-future-local.jsonl` records the local cancel route and SDK retrieve-only surface. `docs/internal/hosted-comparison/20260511-55ffaf5-cancel-future-hosted.jsonl` records hosted raw `/api/v1/cancel_future` returning 404. `docs/internal/hosted-comparison/20260511-0480f94-queue-backpressure-local.jsonl` records the local one-slot queue case. | Disclose until hosted queue timing can be probed. |
+| Cross-entropy | Dense tensors, CSR `target_tokens`/`weights` rehydration, unsupported sparse tensor rejection, invalid weights, and logprobs are covered locally. `docs/internal/hosted-comparison/20260505-497eb1c-ce-hosted-local.jsonl` records matching hosted/local per-token logprob shapes and a forward loss mean difference. `docs/internal/hosted-comparison/20260511-55ffaf5-fractional-weights-hosted.jsonl` records hosted arbitrary fractional dense weights succeeding with `loss:sum` and per-token outputs. | Beta-ready with numeric and metric-name caveats. |
 | Custom losses | `docs/internal/hosted-comparison/20260505-ecc480f-custom-loss-hosted-local.jsonl` records hosted and local `forward_backward_custom` success and `custom_loss:mean` metric shape evidence. | Beta-ready with numeric caveats. |
-| Sampling | Generated logprobs, prompt logprobs, deterministic seed flow, string stops, and top-k prompt logprob shapes are covered locally and in hosted comparison rows. | Beta-ready with numeric/distribution caveats. |
+| Sampling | Generated logprobs, prompt logprobs, deterministic seed flow, string stops, and top-k prompt logprob shapes are covered locally and in hosted comparison rows. `docs/internal/hosted-comparison/20260511-55ffaf5-sampler-distribution-hosted.jsonl` records live hosted seeded samples for fixed token prompts. | Beta-ready with numeric/distribution caveats. |
 | Packaging | Clean-checkout `MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./...`; latest recorded pass: `65f4c6e`. | Beta-ready; rerun before any release commit. |
 | Secrets and artifacts | Hosted comparison JSONL artifacts use scrubbed runner metadata (`python`, `local-runner`). No keys, binaries, downloaded weights, generated caches, or private model paths should be staged. | Beta-ready; keep scanning before release. |
 
@@ -185,9 +185,11 @@ probe is on record. Evidence reviewed 2026-05-11.
   `docs/internal/hosted-comparison/20260511-0480f94-queue-backpressure-local.jsonl`
   records the local one-slot backpressure case: one future is running, the next
   remains queued until the first releases its slot, dashboard queue counts show
-  one running and one queued, and FIFO dispatch is preserved. Hosted
-  cancellation, scheduler timing, and backpressure still have not been compared
-  because this environment has no `TINKER_API_KEY` or `TINKER_BASE_URL`.
+  one running and one queued, and FIFO dispatch is preserved. Hosted raw
+  `POST /api/v1/cancel_future` returns 404 for `id`, `request_id`, and
+  `future_id` request shapes in
+  `docs/internal/hosted-comparison/20260511-55ffaf5-cancel-future-hosted.jsonl`.
+  Hosted scheduler timing and backpressure still have not been compared.
 - Checkpoint archive URLs are local HTTP download URLs, not hosted signed
   download URLs. Hosted rows record `scheme=https`, `has_query=true`,
   `content_disposition_present=false`; local rows record `scheme=http`,
@@ -204,9 +206,12 @@ probe is on record. Evidence reviewed 2026-05-11.
   `internal/tinkerhttp.TestCheckpointArchiveAuthorization` and recorded
   in `docs/internal/hosted-comparison/20260508-e51c8f6-archive-visibility-local.jsonl`
   and refreshed at `0480f94` in
-  `docs/internal/hosted-comparison/20260511-0480f94-archive-auth-signed-url-local.jsonl`
-  (local-only; hosted side blocked on missing `TINKER_API_KEY`/`TINKER_BASE_URL`
-  and a second hosted principal for true cross-owner denial).
+  `docs/internal/hosted-comparison/20260511-0480f94-archive-auth-signed-url-local.jsonl`.
+  Hosted owner-side archive shape for sampler weights is recorded in
+  `docs/internal/hosted-comparison/20260511-55ffaf5-archive-auth-signed-url-hosted.jsonl`:
+  hosted returns an HTTPS object-store signed URL ending in `archive.tar` with
+  six `X-Goog-*` query keys and an `expires` timestamp. A second hosted
+  principal is still required for true cross-owner private denial.
   Hosted-style signed URL emulation and cross-owner authorization remain
   intentionally out of scope for the local coordinator.
 - Dense cross-entropy per-token logprob shapes match the recorded hosted
@@ -222,8 +227,12 @@ probe is on record. Evidence reviewed 2026-05-11.
   `internal/tinkertrain.TestDensePolicyLossesReturnWeightedSumAndLogprobs`.
   `docs/internal/hosted-comparison/20260511-0480f94-policy-losses-hosted-local.jsonl`
   records local `forward` and `forward_backward` rows for all four policy
-  losses, plus hosted blocker rows because no hosted `TINKER_API_KEY` or
-  `TINKER_BASE_URL` was available in this environment.
+  losses. Live hosted evidence in
+  `docs/internal/hosted-comparison/20260511-55ffaf5-policy-losses-hosted.jsonl`
+  shows the same SDK-shaped TensorData fixture failing for all four policy
+  losses with `RequestFailedError`, category `unknown`, and message signature
+  `could_not_convert_loss_function_inputs_to_array_record`. Local policy-loss
+  execution is therefore broader than the hosted behavior recorded here.
 - CSR sparse `target_tokens` and `weights` are accepted and rehydrated to
   dense tensors in both the direct Go API and HTTP path. Pinned by
   `internal/tinkertrain.TestDatumTargetsRehydratesSparse`,
@@ -238,9 +247,13 @@ probe is on record. Evidence reviewed 2026-05-11.
   `(sum w_i * -logp_i) / sum w_i`. Pinned by
   `internal/tinkertrain.TestDenseCrossEntropyFractionalWeights` and
   recorded in
-  `docs/internal/hosted-comparison/20260508-e51c8f6-fractional-weights-local.jsonl`
-  (local-only; hosted side blocked on missing
-  `TINKER_API_KEY`/`TINKER_BASE_URL`).
+  `docs/internal/hosted-comparison/20260508-e51c8f6-fractional-weights-local.jsonl`.
+  Live hosted evidence in
+  `docs/internal/hosted-comparison/20260511-55ffaf5-fractional-weights-hosted.jsonl`
+  shows the `[0.25, 1, 0, 0.75]` dense-weight fixture succeeds for both
+  `forward` and `forward_backward`; hosted reports `loss:sum` and returns
+  `elementwise_loss` plus `logprobs`, while local cross-entropy reports
+  `loss:mean`.
 - Multimodal model input chunks (`image` and `image_asset_pointer`) are
   parsed and token-counted at the SDK boundary, then refused at the MLX
   executor with a typed error that names the missing capability: `image`
@@ -285,12 +298,16 @@ probe is on record. Evidence reviewed 2026-05-11.
   `20260505-951b2dc` rows 10/22, `20260505-a995c00` rows 10/23), but exact
   optimizer internals and numeric continuation are not asserted as
   equivalent. Hosted `optim_step` metrics arrive empty
-  (`20260505-951b2dc` row 7, `20260505-a995c00` row 7) while local emits
+  (`20260505-951b2dc` row 7, `20260505-a995c00` row 7, and
+  `docs/internal/hosted-comparison/20260511-55ffaf5-optimizer-metrics-hosted.jsonl`)
+  while local emits
   `loss:mean`, `optimizer_backend:mlx`, `optimizer_step:unique`
   (`20260505-951b2dc` row 19, `20260505-a995c00` row 20).
 - Hosted and local numeric results are not expected to match exactly. The
   CE forward loss mean differs by ~0.599 (`20260505-497eb1c` row 11) and the
   sampler returns different generated tokens for the same seed/temperature/
   top-p/top-k input — hosted `[15136, 1]` vs local `[4, 4]`
-  (`20260505-a995c00` rows 13 and 26). No systematic sampler-distribution
-  comparison is recorded.
+  (`20260505-a995c00` rows 13 and 26). Hosted seeded sample rows for the
+  current SDK are recorded in
+  `docs/internal/hosted-comparison/20260511-55ffaf5-sampler-distribution-hosted.jsonl`;
+  a paired same-model local distribution comparison is still not recorded.
