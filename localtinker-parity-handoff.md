@@ -100,9 +100,9 @@ for this parity slice unless the user explicitly asks for a full smoke run.
 ## Next Action
 
 Refresh NotebookLM from current `main` after committing this evidence, then ask
-for a strict gap audit. Remaining hosted work needs either a second principal
-for cross-owner archive denial or a paired local run for optimizer numeric
-comparison.
+for a strict gap audit. Remaining hosted work needs a credentialed
+queue/backpressure timing probe and a second principal for cross-owner archive
+denial.
 
 Do not print secret values. Keep commits local unless the user explicitly asks
 to push.

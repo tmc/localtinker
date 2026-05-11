@@ -35,14 +35,14 @@ done
 jq -c . docs/internal/hosted-comparison/*.jsonl >/dev/null
 ```
 
-## Open Hosted Evidence
+## Hosted Evidence And Regression Checks
 
 | Gap | Artifact | Required hosted input |
 | --- | --- | --- |
 | Queue/backpressure | `docs/internal/hosted-comparison/20260511-0480f94-queue-backpressure-local.jsonl` or successor artifact | `TINKER_API_KEY` |
 | Checkpoint archive cross-owner denial | `docs/internal/hosted-comparison/20260511-55ffaf5-archive-auth-signed-url-hosted.jsonl` or successor artifact | `TINKER_API_KEY`, second principal |
 | Sampler distribution regression check | `docs/internal/hosted-comparison/20260511-55ffaf5-sampler-distribution-hosted.jsonl` plus `docs/internal/hosted-comparison/20260511-b1f9f9c-sampler-distribution-local.jsonl` | Reprobe only when sampler semantics or model mapping changes |
-| Optimizer numeric equivalence | `docs/internal/hosted-comparison/20260511-55ffaf5-optimizer-metrics-hosted.jsonl` plus local successor artifact | `TINKER_API_KEY` for hosted, local MLX model cache for paired local |
+| Optimizer metric-surface regression check | `docs/internal/hosted-comparison/20260511-55ffaf5-optimizer-metrics-hosted.jsonl` plus `docs/internal/hosted-comparison/20260511-50b2ee8-optimizer-metrics-local.jsonl` | Reprobe only when optimizer response semantics change; hosted `optim_step` metrics are empty in the recorded fixture |
 | Policy-loss capability regression check | `docs/internal/hosted-comparison/20260511-55ffaf5-policy-losses-hosted.jsonl` | Reprobe only if hosted starts accepting the recorded SDK-shaped TensorData fixture; local currently keeps policy-loss execution available but does not advertise it as hosted-compatible |
 
 ## Artifact Rules
