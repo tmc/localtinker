@@ -63,7 +63,10 @@ localtinker intentionally differs from the hosted service in a few places:
 - checkpoint archive URLs are local HTTP download URLs;
 - hosted authorization and signed URL behavior are not reproduced;
 - numeric results depend on the local MLX libraries and cached model;
-- multimodal chunks and sparse TensorData are rejected locally;
+- multimodal chunks are parsed and validated, then refused at MLX execution
+  because the local runtime has no vision backend;
+- CSR sparse `target_tokens` and `weights` are rehydrated locally; unsupported
+  sparse tensor names are rejected before MLX execution;
 - hosted fleet scheduling is replaced by the local coordinator and optional
   local nodes.
 
