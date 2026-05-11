@@ -127,19 +127,148 @@ func TestDenseImportanceSamplingReturnsWeightedLossAndLogprobs(t *testing.T) {
 		0 - logsumexp(-1, 0, 1),
 		2 - logsumexp(0, 2, 1),
 	}
-	var num, denom float64
+	var num float64
 	for i, lp := range wantLogprobs {
 		if !near(float64(gotLogprobs[i]), lp) {
 			t.Fatalf("logprobs[%d] = %v, want %v", i, gotLogprobs[i], lp)
 		}
 		w := float64(weightVals[i])
 		num += w * math.Exp(lp-float64(oldVals[i])) * float64(advantageVals[i])
-		denom += w
 	}
-	wantLoss := -num / denom
+	wantLoss := -num
 	if !near(float64(gotLoss), wantLoss) {
 		t.Fatalf("loss = %v, want %v", gotLoss, wantLoss)
 	}
+}
+
+func TestDensePolicyLossesReturnWeightedSumAndLogprobs(t *testing.T) {
+	logitVals := []float32{
+		0, 1, 2,
+		2, 0, -2,
+		-1, 0, 1,
+		0, 2, 1,
+	}
+	targetVals := []int32{2, 0, 1, 1}
+	weightVals := []float32{0.25, 1, 0, 0.75}
+	oldVals := []float32{-0.75, -0.25, -0.5, -1.25}
+	advantageVals := []float32{1.5, -0.5, 2, 0.25}
+	wantLogprobs := []float64{
+		2 - logsumexp(0, 1, 2),
+		2 - logsumexp(2, 0, -2),
+		0 - logsumexp(-1, 0, 1),
+		2 - logsumexp(0, 2, 1),
+	}
+	tests := []struct {
+		lossFn string
+		config policyLossConfig
+		want   func(lp, old, adv, w float64) float64
+	}{
+		{
+			lossFn: "importance_sampling",
+			want: func(lp, old, adv, w float64) float64 {
+				return -w * math.Exp(lp-old) * adv
+			},
+		},
+		{
+			lossFn: "ppo",
+			config: policyLossConfig{clipLow: 0.8, clipHigh: 1.2},
+			want: func(lp, old, adv, w float64) float64 {
+				ratio := math.Exp(lp - old)
+				clipped := math.Min(math.Max(ratio, 0.8), 1.2)
+				return -w * math.Min(ratio*adv, clipped*adv)
+			},
+		},
+		{
+			lossFn: "cispo",
+			config: policyLossConfig{clipLow: 0.8, clipHigh: 1.2},
+			want: func(lp, old, adv, w float64) float64 {
+				ratio := math.Exp(lp - old)
+				clipped := math.Min(math.Max(ratio, 0.8), 1.2)
+				return -w * clipped * lp * adv
+			},
+		},
+		{
+			lossFn: "dro",
+			config: policyLossConfig{beta: 0.05},
+			want: func(lp, old, adv, w float64) float64 {
+				delta := lp - old
+				return -w * (lp*adv - 0.5*0.05*delta*delta)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.lossFn, func(t *testing.T) {
+			logits, targets, weights, oldLogprobs, advantages := policyLossArrays(t, logitVals, targetVals, weightVals, oldVals, advantageVals)
+			defer logits.Free()
+			defer targets.Free()
+			defer weights.Free()
+			defer oldLogprobs.Free()
+			defer advantages.Free()
+
+			loss, logprobs, err := densePolicyLoss(tt.lossFn, logits, targets, weights, oldLogprobs, advantages, tt.config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer loss.Free()
+			defer logprobs.Free()
+			if err := mlx.Eval(loss, logprobs); err != nil {
+				t.Fatal(err)
+			}
+			gotLoss, err := mlx.ItemAs[float32](loss)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotLogprobs, err := mlx.ToSlice[float32](logprobs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wantLoss float64
+			for i, lp := range wantLogprobs {
+				if !near(float64(gotLogprobs[i]), lp) {
+					t.Fatalf("logprobs[%d] = %v, want %v", i, gotLogprobs[i], lp)
+				}
+				wantLoss += tt.want(lp, float64(oldVals[i]), float64(advantageVals[i]), float64(weightVals[i]))
+			}
+			if !near(float64(gotLoss), wantLoss) {
+				t.Fatalf("loss = %v, want %v", gotLoss, wantLoss)
+			}
+		})
+	}
+}
+
+func policyLossArrays(t *testing.T, logits []float32, targetVals []int32, weights, oldVals, advantageVals []float32) (logitArr, targetArr, weightArr, oldArr, advantageArr *mlx.Array) {
+	t.Helper()
+	logitArr, err := mlx.FromSlice(logits, []int{1, len(targetVals), 3}, mlx.Float32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetArr, err = mlx.FromSlice(targetVals, []int{1, len(targetVals)}, mlx.Int32)
+	if err != nil {
+		logitArr.Free()
+		t.Fatal(err)
+	}
+	weightArr, err = mlx.FromSlice(weights, []int{1, len(targetVals)}, mlx.Float32)
+	if err != nil {
+		logitArr.Free()
+		targetArr.Free()
+		t.Fatal(err)
+	}
+	oldArr, err = mlx.FromSlice(oldVals, []int{1, len(targetVals)}, mlx.Float32)
+	if err != nil {
+		logitArr.Free()
+		targetArr.Free()
+		weightArr.Free()
+		t.Fatal(err)
+	}
+	advantageArr, err = mlx.FromSlice(advantageVals, []int{1, len(targetVals)}, mlx.Float32)
+	if err != nil {
+		logitArr.Free()
+		targetArr.Free()
+		weightArr.Free()
+		oldArr.Free()
+		t.Fatal(err)
+	}
+	return logitArr, targetArr, weightArr, oldArr, advantageArr
 }
 
 func TestDenseImportanceSamplingRejectsBadInputs(t *testing.T) {

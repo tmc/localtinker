@@ -335,7 +335,7 @@ func TestCapabilitiesReportExecutableLosses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"cross_entropy", "importance_sampling"}
+	want := []string{"cross_entropy", "importance_sampling", "ppo", "cispo", "dro"}
 	if len(caps.Losses) != len(want) {
 		t.Fatalf("Losses = %v, want %v", caps.Losses, want)
 	}

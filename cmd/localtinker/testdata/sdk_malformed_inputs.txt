@@ -11,7 +11,7 @@ from tinker import ServiceClient
 base_url = os.environ["TINKER_BASE_URL"]
 client = ServiceClient()
 try:
-    def expect_user_error(name, datum, want, loss_fn="cross_entropy"):
+    def expect_user_error(name, datum, want, loss_fn="cross_entropy", loss_fn_config=None):
         req = {
             "model_id": "model-a",
             "forward_input": {
@@ -19,6 +19,8 @@ try:
                 "data": [datum],
             },
         }
+        if loss_fn_config is not None:
+            req["forward_input"]["loss_fn_config"] = loss_fn_config
         resp = httpx.post(f"{base_url}/api/v1/forward", json=req, timeout=5)
         assert resp.status_code == 400, (name, resp.status_code, resp.text)
         body = resp.json()
@@ -77,6 +79,15 @@ try:
         "shape": [2, 3],
     }
     expect_user_error("bad_shape", bad_shape, "shape [2 3] has 6 elements but data has 4")
+
+    cross_entropy_config = valid_datum()
+    expect_user_error(
+        "cross_entropy_config",
+        cross_entropy_config,
+        'unsupported loss_fn_config key "beta" for cross_entropy',
+        "cross_entropy",
+        {"beta": 0.1},
+    )
 
     importance_missing_logprobs = valid_datum()
     importance_missing_logprobs["loss_fn_inputs"]["advantages"] = {

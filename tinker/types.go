@@ -160,10 +160,16 @@ type CISPO struct {
 	ClipHigh float32
 }
 
+// DRO is the Tinker DRO loss.
+type DRO struct {
+	Beta float32
+}
+
 func (CrossEntropy) loss()       {}
 func (ImportanceSampling) loss() {}
 func (PPO) loss()                {}
 func (CISPO) loss()              {}
+func (DRO) loss()                {}
 
 func validateBatch(batch []Datum, loss Loss) error {
 	if len(batch) == 0 {
@@ -198,7 +204,7 @@ func validateLossInput(in LossInput, loss Loss) (int, error) {
 	switch loss.(type) {
 	case CrossEntropy:
 		return n, nil
-	case ImportanceSampling, PPO, CISPO:
+	case ImportanceSampling, PPO, CISPO, DRO:
 		if len(in.Logprobs) != n {
 			return 0, errors.New("logprobs length does not match target tokens")
 		}

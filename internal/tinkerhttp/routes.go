@@ -553,7 +553,7 @@ func firstInput(a, b tinkertrain.ForwardBackwardInput) tinkertrain.ForwardBackwa
 
 func normalizeAndValidateInput(input *tinkertrain.ForwardBackwardInput) error {
 	switch input.LossFn {
-	case "cross_entropy", "importance_sampling":
+	case "cross_entropy", "importance_sampling", "ppo", "cispo", "dro":
 	default:
 		return fmt.Errorf("unsupported loss function %q", input.LossFn)
 	}
@@ -592,7 +592,7 @@ func lossInputKeyAllowed(lossFn, name string) bool {
 	switch lossFn {
 	case "cross_entropy":
 		return name == "target_tokens" || name == "weights"
-	case "importance_sampling":
+	case "importance_sampling", "ppo", "cispo", "dro":
 		switch name {
 		case "target_tokens", "weights", "logprobs", "advantages":
 			return true
@@ -602,15 +602,51 @@ func lossInputKeyAllowed(lossFn, name string) bool {
 }
 
 func validateLossFnConfig(lossFn string, config map[string]float64) error {
-	if len(config) == 0 {
+	if len(config) == 0 && lossFn != "dro" {
 		return nil
 	}
 	switch lossFn {
-	case "cross_entropy":
-		return nil
-	default:
+	case "cross_entropy", "importance_sampling":
 		for name := range config {
 			return fmt.Errorf("unsupported loss_fn_config key %q for %s", name, lossFn)
+		}
+		return nil
+	case "ppo", "cispo":
+		low := 0.8
+		high := 1.2
+		for name, v := range config {
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				return fmt.Errorf("loss_fn_config[%q] = %v is not finite", name, v)
+			}
+			if v <= 0 {
+				return fmt.Errorf("loss_fn_config[%q] = %v is not positive", name, v)
+			}
+			switch name {
+			case "clip_low_threshold":
+				low = v
+			case "clip_high_threshold":
+				high = v
+			default:
+				return fmt.Errorf("unsupported loss_fn_config key %q for %s", name, lossFn)
+			}
+		}
+		if low > high {
+			return fmt.Errorf("clip_low_threshold %v exceeds clip_high_threshold %v", low, high)
+		}
+	case "dro":
+		if _, ok := config["beta"]; !ok {
+			return errors.New(`missing loss_fn_config["beta"] for dro`)
+		}
+		for name, v := range config {
+			if name != "beta" {
+				return fmt.Errorf("unsupported loss_fn_config key %q for dro", name)
+			}
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				return fmt.Errorf("loss_fn_config[%q] = %v is not finite", name, v)
+			}
+			if v <= 0 {
+				return fmt.Errorf("loss_fn_config[%q] = %v is not positive", name, v)
+			}
 		}
 	}
 	return nil
@@ -697,7 +733,7 @@ func validateLossDatum(lossFn string, i int, datum tinkertrain.Datum) error {
 
 func policyLoss(lossFn string) bool {
 	switch lossFn {
-	case "importance_sampling":
+	case "importance_sampling", "ppo", "cispo", "dro":
 		return true
 	}
 	return false

@@ -667,19 +667,72 @@ func TestTrainingInputValidationAcceptsDenseCrossEntropy(t *testing.T) {
 }
 
 func TestTrainingInputValidationAcceptsPolicyLossInputs(t *testing.T) {
-	input := policyLossValidationInput("importance_sampling")
-	if err := normalizeAndValidateInput(&input); err != nil {
-		t.Fatal(err)
+	for _, lossFn := range []string{"importance_sampling", "ppo", "cispo", "dro"} {
+		t.Run(lossFn, func(t *testing.T) {
+			input := policyLossValidationInput(lossFn)
+			if err := normalizeAndValidateInput(&input); err != nil {
+				t.Fatal(err)
+			}
+			datum := input.Data[0]
+			if got := datum.LossFnInputs["target_tokens"]; got.DType != "int64" || !sameShape(got.Shape, []int{2, 2}) {
+				t.Fatalf("target_tokens = %#v", got)
+			}
+			for _, name := range []string{"weights", "logprobs", "advantages"} {
+				got := datum.LossFnInputs[name]
+				if got.DType != "float32" || !sameShape(got.Shape, []int{2, 2}) {
+					t.Fatalf("%s = %#v", name, got)
+				}
+			}
+		})
 	}
-	datum := input.Data[0]
-	if got := datum.LossFnInputs["target_tokens"]; got.DType != "int64" || !sameShape(got.Shape, []int{2, 2}) {
-		t.Fatalf("target_tokens = %#v", got)
+}
+
+func TestTrainingInputValidationAcceptsPolicyLossConfig(t *testing.T) {
+	tests := []struct {
+		name   string
+		lossFn string
+		config map[string]float64
+	}{
+		{name: "ppo defaults", lossFn: "ppo"},
+		{name: "ppo custom clip", lossFn: "ppo", config: map[string]float64{"clip_low_threshold": 0.9, "clip_high_threshold": 1.1}},
+		{name: "cispo defaults", lossFn: "cispo"},
+		{name: "cispo custom clip", lossFn: "cispo", config: map[string]float64{"clip_low_threshold": 0.8, "clip_high_threshold": 1.2}},
+		{name: "dro beta", lossFn: "dro", config: map[string]float64{"beta": 0.05}},
 	}
-	for _, name := range []string{"weights", "logprobs", "advantages"} {
-		got := datum.LossFnInputs[name]
-		if got.DType != "float32" || !sameShape(got.Shape, []int{2, 2}) {
-			t.Fatalf("%s = %#v", name, got)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := policyLossValidationInput(tt.lossFn)
+			input.LossFnConfig = tt.config
+			if err := normalizeAndValidateInput(&input); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestTrainingInputValidationRejectsPolicyLossConfig(t *testing.T) {
+	tests := []struct {
+		name   string
+		lossFn string
+		config map[string]float64
+		want   string
+	}{
+		{name: "ppo reversed clip", lossFn: "ppo", config: map[string]float64{"clip_low_threshold": 1.2, "clip_high_threshold": 0.8}, want: "clip_low_threshold 1.2 exceeds clip_high_threshold 0.8"},
+		{name: "ppo bad key", lossFn: "ppo", config: map[string]float64{"beta": 0.1}, want: `unsupported loss_fn_config key "beta" for ppo`},
+		{name: "cispo non positive clip", lossFn: "cispo", config: map[string]float64{"clip_low_threshold": 0}, want: `loss_fn_config["clip_low_threshold"] = 0 is not positive`},
+		{name: "dro missing beta", lossFn: "dro", want: `missing loss_fn_config["beta"] for dro`},
+		{name: "dro bad key", lossFn: "dro", config: map[string]float64{"clip_low_threshold": 0.8, "beta": 0.05}, want: `unsupported loss_fn_config key "clip_low_threshold" for dro`},
+		{name: "dro non positive beta", lossFn: "dro", config: map[string]float64{"beta": 0}, want: `loss_fn_config["beta"] = 0 is not positive`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := policyLossValidationInput(tt.lossFn)
+			input.LossFnConfig = tt.config
+			err := normalizeAndValidateInput(&input)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want containing %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -763,19 +816,9 @@ func TestTrainingInputValidationRejectsPolicyLossInputs(t *testing.T) {
 			want: `unsupported loss_fn_config key "clip_low_threshold" for importance_sampling`,
 		},
 		{
-			name:   "dro remains unsupported",
-			lossFn: "dro",
-			want:   `unsupported loss function "dro"`,
-		},
-		{
-			name:   "ppo remains unsupported",
-			lossFn: "ppo",
-			want:   `unsupported loss function "ppo"`,
-		},
-		{
-			name:   "cispo remains unsupported",
-			lossFn: "cispo",
-			want:   `unsupported loss function "cispo"`,
+			name:   "unknown loss remains unsupported",
+			lossFn: "unknown",
+			want:   `unsupported loss function "unknown"`,
 		},
 	}
 	for _, tt := range tests {
@@ -793,7 +836,7 @@ func TestTrainingInputValidationRejectsPolicyLossInputs(t *testing.T) {
 }
 
 func policyLossValidationInput(lossFn string) tinkertrain.ForwardBackwardInput {
-	return tinkertrain.ForwardBackwardInput{
+	input := tinkertrain.ForwardBackwardInput{
 		LossFn: lossFn,
 		Data: []tinkertrain.Datum{{
 			ModelInput: tinkertrain.ModelInput{Chunks: []tinkertrain.ModelInputChunk{{
@@ -808,6 +851,10 @@ func policyLossValidationInput(lossFn string) tinkertrain.ForwardBackwardInput {
 			},
 		}},
 	}
+	if lossFn == "dro" {
+		input.LossFnConfig = map[string]float64{"beta": 0.05}
+	}
+	return input
 }
 
 func TestTrainingInputValidationNormalizesTensorData(t *testing.T) {
