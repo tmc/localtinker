@@ -71,7 +71,7 @@ Coordinator handoffs:
 
 - Final gap analysis: `/tmp/localtinker-final-gap-analysis-21D23B54.md`
 - Hosted probe resume runbook:
-  `/tmp/localtinker-hosted-probe-resume-21D23B54.md`
+  `docs/internal/hosted-probes.md`
 - Preserved stale worktree patch:
   `/tmp/localtinker-wt-betadocs-dirty-20260511T051213Z.patch`
 
@@ -93,7 +93,7 @@ for this parity slice unless the user explicitly asks for a full smoke run.
 
 ## Next Action When Credentials Exist
 
-Run `/tmp/localtinker-hosted-probe-resume-21D23B54.md`.
+Run `docs/internal/hosted-probes.md`.
 
 Do not print secret values. Record only scrubbed hosted metadata in JSONL. Keep
 commits local unless the user explicitly asks to push.

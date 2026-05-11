@@ -105,7 +105,8 @@ ${LOCALTINKER_SDK_PYTHON:-$TINKER_SDK_DIR/.venv/bin/python} \
 Hosted comparison artifacts under `docs/internal/hosted-comparison/` record
 paired SDK runs against hosted Tinker and localtinker. Before treating a new SDK
 surface as hosted-compatible, run the same minimal SDK job against both backends
-and record:
+and record the fields below. The credentialed hosted follow-up procedure is in
+`docs/internal/hosted-probes.md`.
 
 - training run ID
 - future request IDs and terminal response shapes
