@@ -39,7 +39,7 @@ jq -c . hosted comparison fixtures >/dev/null
 
 | Gap | Artifact | Required hosted input |
 | --- | --- | --- |
-| Queue/backpressure | `hosted comparison fixture` or successor artifact | `TINKER_API_KEY` |
+| Queue/backpressure regression check | `hosted comparison fixture` plus `hosted comparison fixture` | Reprobe only when hosted scheduler or future metadata semantics change |
 | Checkpoint archive cross-owner denial | `hosted comparison fixture` or successor artifact | `TINKER_API_KEY`, second principal |
 | Sampler distribution regression check | `hosted comparison fixture` plus `hosted comparison fixture` | Reprobe only when sampler semantics or model mapping changes |
 | Optimizer metric-surface regression check | `hosted comparison fixture` plus `hosted comparison fixture` | Reprobe only when optimizer response semantics change; hosted `optim_step` metrics are empty in the recorded fixture |
