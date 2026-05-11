@@ -7,8 +7,12 @@ Required inputs:
 
 ```sh
 export TINKER_API_KEY=...
-export TINKER_BASE_URL=...
 ```
+
+The current Python SDK defaults to
+`https://tinker.thinkingmachines.dev/services/tinker-prod` when
+`TINKER_BASE_URL` is unset. Set `TINKER_BASE_URL` only when probing a different
+hosted deployment.
 
 Checkpoint archive cross-owner denial also requires a second hosted principal:
 
@@ -35,13 +39,11 @@ jq -c . hosted comparison fixtures >/dev/null
 
 | Gap | Artifact | Required hosted input |
 | --- | --- | --- |
-| Fractional dense weights | `hosted comparison fixture` or successor artifact | `TINKER_API_KEY`, `TINKER_BASE_URL` |
-| Policy losses | `hosted comparison fixture` | `TINKER_API_KEY`, `TINKER_BASE_URL` |
-| Cancel futures | `hosted comparison fixture` or successor artifact | `TINKER_API_KEY`, `TINKER_BASE_URL` |
-| Queue/backpressure | `hosted comparison fixture` or successor artifact | `TINKER_API_KEY`, `TINKER_BASE_URL` |
-| Checkpoint archive signed URL/auth | `hosted comparison fixture` or successor artifact | `TINKER_API_KEY`, `TINKER_BASE_URL`, second principal |
-| Sampler distribution | `hosted comparison fixturesYYYYMMDD-<short-head>-sampler-distribution-hosted-local.jsonl` | `TINKER_API_KEY`, `TINKER_BASE_URL` |
-| Optimizer metrics | `hosted comparison fixturesYYYYMMDD-<short-head>-optimizer-metrics-hosted-local.jsonl` | `TINKER_API_KEY`, `TINKER_BASE_URL` |
+| Queue/backpressure | `hosted comparison fixture` or successor artifact | `TINKER_API_KEY` |
+| Checkpoint archive cross-owner denial | `hosted comparison fixture` or successor artifact | `TINKER_API_KEY`, second principal |
+| Same-model sampler distribution comparison | `hosted comparison fixture` plus local successor artifact | `TINKER_API_KEY` for hosted, local MLX model cache for paired local |
+| Optimizer numeric equivalence | `hosted comparison fixture` plus local successor artifact | `TINKER_API_KEY` for hosted, local MLX model cache for paired local |
+| Policy-loss capability decision | `hosted comparison fixture` | No more hosted input; decide whether local should keep advertising policy losses that hosted rejects for the recorded fixture |
 
 ## Artifact Rules
 
