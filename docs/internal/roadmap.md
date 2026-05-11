@@ -210,8 +210,8 @@ Goal: keep local behavior honest against hosted Tinker.
 ## Next Milestones
 
 1. When hosted credentials are available, run the hosted probes in
-   `/tmp/localtinker-hosted-probe-resume-21D23B54.md` and replace blocker rows
-   with real hosted evidence rows.
+   `docs/internal/hosted-probes.md` and replace blocker rows with real hosted
+   evidence rows.
 2. Submit the hosted fractional dense-weight fixture and compare response
    shape plus `loss_fn_outputs.weights`/loss metrics against the local row.
 3. Compare hosted/local sampler distributions across fixed prompts, seeds,
