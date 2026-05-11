@@ -29,6 +29,7 @@ const (
 	defaultMaxRequestBytes = 128 << 20
 	defaultMaxOperations   = 1
 	defaultLeaseTimeout    = 30 * time.Second
+	localNodeID            = "local-coordinator"
 )
 
 type Coordinator struct {
@@ -905,6 +906,10 @@ func (c *Coordinator) runOperation(ctx context.Context, id string, run operation
 	}
 	future.State = FutureRunning
 	future.StartedAt = now
+	future.Attempt++
+	future.AssignedNodeID = localNodeID
+	future.LastAttemptAt = now
+	future.LastHeartbeatAt = now
 	future.LeaseID = leaseID
 	future.LeaseExpiresAt = now.Add(c.leaseTimeout)
 	if err := c.store.PutFuture(ctx, future); err != nil {
@@ -949,6 +954,16 @@ func (c *Coordinator) finishFuture(ctx context.Context, future tinkerdb.Future, 
 		}
 		future.Error = errJSON
 		future.ResultBytes = int64(len(errJSON))
+	}
+	if future.LeaseID != "" {
+		_, ok, err := c.store.FinishFuture(ctx, future.ID, future.LeaseID, state, future.Result, future.Error, now)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+		return nil
 	}
 	future.State = state
 	future.CompletedAt = now
