@@ -44,13 +44,8 @@ type Coordinator struct {
 	sem           chan struct{}
 	wg            sync.WaitGroup
 	mu            sync.Mutex
-	queue         []queuedOperation
+	runs          map[string]operationFunc
 	closed        bool
-}
-
-type queuedOperation struct {
-	id  string
-	run operationFunc
 }
 
 type Config struct {
@@ -234,6 +229,7 @@ func New(cfg Config) (*Coordinator, error) {
 		maxOperations:   cfg.MaxOperations,
 		leaseTimeout:    cfg.LeaseTimeout,
 		sem:             make(chan struct{}, cfg.MaxOperations),
+		runs:            make(map[string]operationFunc),
 	}
 	c.recoverUnfinished(context.Background())
 	return c, nil
@@ -879,51 +875,49 @@ func (c *Coordinator) startOperation(id string, run operationFunc) {
 		c.mu.Unlock()
 		return
 	}
-	c.queue = append(c.queue, queuedOperation{id: id, run: run})
+	if c.runs == nil {
+		c.runs = make(map[string]operationFunc)
+	}
+	c.runs[id] = run
 	c.dispatchLocked()
 	c.mu.Unlock()
 }
 
 func (c *Coordinator) dispatchLocked() {
-	for len(c.queue) > 0 && len(c.sem) < cap(c.sem) {
-		op := c.queue[0]
-		copy(c.queue, c.queue[1:])
-		c.queue = c.queue[:len(c.queue)-1]
+	for len(c.sem) < cap(c.sem) {
+		future, ok, err := c.store.ClaimNextFuture(context.Background(), localNodeID, c.now().UTC(), c.leaseTimeout)
+		if err != nil || !ok {
+			return
+		}
+		run := c.runs[future.ID]
+		if run == nil {
+			_ = c.finishFuture(context.Background(), future, nil, map[string]any{
+				"code":    "system_error",
+				"message": "operation implementation unavailable",
+			}, FutureSystemError)
+			continue
+		}
 		c.sem <- struct{}{}
 		c.wg.Add(1)
-		go c.runQueuedOperation(op)
+		go c.runQueuedOperation(future, run)
 	}
 }
 
-func (c *Coordinator) runQueuedOperation(op queuedOperation) {
+func (c *Coordinator) runQueuedOperation(future tinkerdb.Future, run operationFunc) {
 	defer c.wg.Done()
-	c.runOperation(context.Background(), op.id, op.run)
+	c.runOperation(context.Background(), future, run)
 	c.mu.Lock()
+	current, err := c.store.GetFuture(context.Background(), future.ID)
+	if err != nil || current.State != FutureQueued {
+		delete(c.runs, future.ID)
+	}
 	<-c.sem
 	c.dispatchLocked()
 	c.mu.Unlock()
 }
 
-func (c *Coordinator) runOperation(ctx context.Context, id string, run operationFunc) {
-	future, err := c.store.GetFuture(ctx, id)
-	if err != nil || future.State != FutureQueued {
-		return
-	}
-	now := c.now().UTC()
-	leaseID, err := newID("lease")
-	if err != nil {
-		_ = c.finishFuture(ctx, future, nil, systemError(err), FutureSystemError)
-		return
-	}
-	future.State = FutureRunning
-	future.StartedAt = now
-	future.Attempt++
-	future.AssignedNodeID = localNodeID
-	future.LastAttemptAt = now
-	future.LastHeartbeatAt = now
-	future.LeaseID = leaseID
-	future.LeaseExpiresAt = now.Add(c.leaseTimeout)
-	if err := c.store.PutFuture(ctx, future); err != nil {
+func (c *Coordinator) runOperation(ctx context.Context, future tinkerdb.Future, run operationFunc) {
+	if future.State != FutureRunning || future.LeaseID == "" {
 		return
 	}
 	runCtx, cancel := context.WithTimeout(ctx, c.leaseTimeout)
@@ -983,10 +977,6 @@ func (c *Coordinator) finishFuture(ctx context.Context, future tinkerdb.Future, 
 
 func userError(message string) map[string]any {
 	return map[string]any{"code": "user_error", "message": message}
-}
-
-func systemError(err error) map[string]any {
-	return map[string]any{"code": "system_error", "message": err.Error()}
 }
 
 func (c *Coordinator) recoverUnfinished(ctx context.Context) {
