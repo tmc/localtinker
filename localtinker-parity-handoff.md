@@ -48,7 +48,9 @@ Closed locally:
 
 Open hosted/comparison gaps:
 
-- Hosted private cross-owner archive denial, requiring a second principal.
+- Hosted private cross-owner archive denial, requiring a valid second
+  principal. Hosted invalid-token archive denial is recorded as an
+  authentication negative-control, not cross-owner evidence.
 
 ## Evidence Artifacts
 
@@ -68,6 +70,7 @@ Current in-repo artifacts:
 - `docs/internal/hosted-comparison/20260511-55ffaf5-optimizer-metrics-hosted.jsonl`
 - `docs/internal/hosted-comparison/20260511-50b2ee8-optimizer-metrics-local.jsonl`
 - `docs/internal/hosted-comparison/20260511-55ffaf5-archive-auth-signed-url-hosted.jsonl`
+- `docs/internal/hosted-comparison/20260511-28826b2-archive-invalid-token-hosted.jsonl`
 - `docs/internal/hosted-comparison/20260511-55ffaf5-cancel-future-hosted.jsonl`
 
 Coordinator handoffs:
@@ -100,8 +103,9 @@ for this parity slice unless the user explicitly asks for a full smoke run.
 ## Next Action
 
 Refresh NotebookLM from current `main` after committing this evidence, then ask
-for a strict gap audit. Remaining hosted work needs a second principal for
-cross-owner archive denial.
+for a strict gap audit. Remaining hosted work needs a valid second principal
+for cross-owner archive denial; the invalid-token control should not be treated
+as a substitute for that probe.
 
 Do not print secret values. Keep commits local unless the user explicitly asks
 to push.

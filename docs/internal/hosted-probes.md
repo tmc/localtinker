@@ -40,7 +40,8 @@ jq -c . docs/internal/hosted-comparison/*.jsonl >/dev/null
 | Gap | Artifact | Required hosted input |
 | --- | --- | --- |
 | Queue/backpressure regression check | `docs/internal/hosted-comparison/20260511-0480f94-queue-backpressure-local.jsonl` plus `docs/internal/hosted-comparison/20260511-f06603b-queue-backpressure-hosted.jsonl` | Reprobe only when hosted scheduler or future metadata semantics change |
-| Checkpoint archive cross-owner denial | `docs/internal/hosted-comparison/20260511-55ffaf5-archive-auth-signed-url-hosted.jsonl` or successor artifact | `TINKER_API_KEY`, second principal |
+| Checkpoint archive invalid-credential control | `docs/internal/hosted-comparison/20260511-28826b2-archive-invalid-token-hosted.jsonl` | Reprobe only when archive authorization error shape changes; this is not cross-owner evidence |
+| Checkpoint archive cross-owner denial | `docs/internal/hosted-comparison/20260511-55ffaf5-archive-auth-signed-url-hosted.jsonl` plus future successor artifact | `TINKER_API_KEY`, valid second principal |
 | Sampler distribution regression check | `docs/internal/hosted-comparison/20260511-55ffaf5-sampler-distribution-hosted.jsonl` plus `docs/internal/hosted-comparison/20260511-b1f9f9c-sampler-distribution-local.jsonl` | Reprobe only when sampler semantics or model mapping changes |
 | Optimizer metric-surface regression check | `docs/internal/hosted-comparison/20260511-55ffaf5-optimizer-metrics-hosted.jsonl` plus `docs/internal/hosted-comparison/20260511-50b2ee8-optimizer-metrics-local.jsonl` | Reprobe only when optimizer response semantics change; hosted `optim_step` metrics are empty in the recorded fixture |
 | Policy-loss capability regression check | `docs/internal/hosted-comparison/20260511-55ffaf5-policy-losses-hosted.jsonl` | Reprobe only if hosted starts accepting the recorded SDK-shaped TensorData fixture; local currently keeps policy-loss execution available but does not advertise it as hosted-compatible |

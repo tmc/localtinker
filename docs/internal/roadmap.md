@@ -213,7 +213,9 @@ Goal: keep local behavior honest against hosted Tinker.
   visibility, expiration, and private/public state are pinned. Hosted owner
   signed URL shape is recorded in
   `docs/internal/hosted-comparison/20260511-55ffaf5-archive-auth-signed-url-hosted.jsonl`,
-  but cross-owner authorization evidence still requires a second principal
+  and hosted invalid-token denial on the same archive URL surface is recorded in
+  `docs/internal/hosted-comparison/20260511-28826b2-archive-invalid-token-hosted.jsonl`.
+  Cross-owner authorization evidence still requires a valid second principal
   token.
 - Hosted numerics and local MLX numerics will differ. Hosted sampler rows and
   hosted optimizer metrics/resume shape are now recorded at `55ffaf5`.
@@ -227,8 +229,9 @@ Goal: keep local behavior honest against hosted Tinker.
 
 ## Next Milestones
 
-1. Probe hosted private cross-owner archive denial with a second hosted
-   principal.
+1. Probe hosted private cross-owner archive denial with a valid second hosted
+   principal. The invalid-token control is recorded, but it is not cross-owner
+   evidence.
 2. Revisit policy-loss capability advertising only if hosted starts accepting
    the recorded SDK-shaped TensorData fixture.
 3. MLX library setup (`MLX_LIB_PATH`) for clean checkouts is documented in
