@@ -29,7 +29,7 @@ Equivalent names such as `TINKER_SECOND_API_KEY`, `TINKER_ALT_API_KEY`, or
 cd /Volumes/tmc/go/src/github.com/tmc/localtinker
 git status --short --branch
 git rev-parse HEAD
-for v in TINKER_API_KEY TINKER_BASE_URL; do
+for v in TINKER_API_KEY TINKER_BASE_URL TINKER_API_KEY_2 TINKER_SECOND_API_KEY TINKER_ALT_API_KEY TINKER_CROSS_OWNER_API_KEY; do
 	if [ -n "${!v:-}" ]; then echo "$v=present"; else echo "$v=missing"; fi
 done
 jq -c . docs/internal/hosted-comparison/*.jsonl >/dev/null

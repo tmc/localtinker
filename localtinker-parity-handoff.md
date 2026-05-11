@@ -3,17 +3,16 @@
 Date: 2026-05-11
 Repo: `/Volumes/tmc/go/src/github.com/tmc/localtinker`
 Current local HEAD: run `git rev-parse HEAD`
-Last NotebookLM-audited local HEAD: `3366b6bc6424da8995eb8f46c0de2b86f545f3f8`
+Last NotebookLM-audited local HEAD: `23cf8a8f91760ef0328de7bda48c671e66b537cf`
 Push: not run
 Notebook ID: `a912d601-badc-409b-bbdb-daf9316b843b`
 
 ## Current Verdict
 
-NotebookLM was refreshed after the archive invalid-token evidence and reported
-no remaining local implementation or documentation gaps for the documented beta
-surface. After `366e802`, determinism docs were corrected to describe the
-current local loss-function surface. That last docs-only correction still needs
-a NotebookLM refresh when `nlm auth` is available again.
+NotebookLM was refreshed after the archive invalid-token evidence, determinism
+loss-surface correction, and handoff refresh. It reported no remaining local
+implementation or documentation gaps for the documented beta surface at
+`23cf8a8`.
 After a hosted API key was supplied, a follow-up probe pass recorded live hosted
 rows for policy losses, fractional dense weights, sampler output, optimizer
 metrics/resume shape, owner-side archive signed URLs, and raw cancel-future
@@ -21,12 +20,15 @@ route shape. No key or signed URL value was written to artifacts.
 
 Synced notebook sources:
 
-- `repo: localtinker` -> `e33be21f-6eaf-4710-8e5c-f1d724cbba77`
-- `localtinker-sdk-parity-status.md` -> `dfa9c9fb-7b77-433c-886f-ac9ac29fb00b`
+- `repo: localtinker` -> `9218ab3c-4a9c-44f9-ac38-d678479bade4`
+- `localtinker-sdk-parity-status.md` -> `7254d15f-68ed-4b97-8f54-cacf187266ff`
 - `repo: tinker sdk` -> `7c9465b0-2583-48ba-a288-e7ab5ff8e3b2`
 
-Later `nlm source list` attempts hit expired auth. Run `nlm auth` before the
-next NotebookLM refresh.
+The latest NotebookLM chat (`5e9f8b73-a826-4f7c-884f-fb885db0eed9`) answered
+that no open local gaps remain, all known built-in loss methods execute
+locally, only `cross_entropy` is intentionally advertised as hosted-compatible,
+and the archive invalid-token artifact is not valid second-principal
+cross-owner denial evidence.
 
 Closed locally:
 
@@ -112,10 +114,11 @@ for this parity slice unless the user explicitly asks for a full smoke run.
 
 ## Next Action
 
-Run `nlm auth`, refresh NotebookLM from current `main`, then ask for a strict
-gap audit. Remaining hosted work needs a valid second principal for cross-owner
-archive denial; the invalid-token control should not be treated as a substitute
-for that probe.
+Remaining hosted work needs a valid second principal for cross-owner archive
+denial; the invalid-token control should not be treated as a substitute for
+that probe. `docs/internal/hosted-probes.md` now checks the primary credential,
+optional `TINKER_BASE_URL`, and second-principal aliases in preflight so the
+skip reason is visible before rerunning probes.
 
 Do not print secret values. Keep commits local unless the user explicitly asks
 to push.
