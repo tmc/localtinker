@@ -102,15 +102,18 @@ type Model struct {
 }
 
 type Node struct {
-	ID             string          `json:"id"`
-	SessionID      string          `json:"session_id,omitempty"`
-	State          string          `json:"state"`
-	Capabilities   json.RawMessage `json:"capabilities_json,omitempty"`
-	MaxConcurrency int             `json:"max_concurrency,omitempty"`
-	Running        int             `json:"running,omitempty"`
-	StartedAt      time.Time       `json:"started_at,omitempty"`
-	LastSeenAt     time.Time       `json:"last_seen_at,omitempty"`
-	DrainingSince  time.Time       `json:"draining_since,omitempty"`
+	ID             string            `json:"id"`
+	Name           string            `json:"name,omitempty"`
+	SessionID      string            `json:"session_id,omitempty"`
+	State          string            `json:"state"`
+	Labels         map[string]string `json:"labels,omitempty"`
+	Capabilities   json.RawMessage   `json:"capabilities_json,omitempty"`
+	Load           json.RawMessage   `json:"load_json,omitempty"`
+	MaxConcurrency int               `json:"max_concurrency,omitempty"`
+	Running        int               `json:"running,omitempty"`
+	StartedAt      time.Time         `json:"started_at,omitempty"`
+	LastSeenAt     time.Time         `json:"last_seen_at,omitempty"`
+	DrainingSince  time.Time         `json:"draining_since,omitempty"`
 }
 
 type Checkpoint struct {

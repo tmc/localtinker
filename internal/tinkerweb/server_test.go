@@ -83,7 +83,17 @@ func TestDashboardRoutes(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Mesh.Nodes) != 1 || got.Mesh.Nodes[0].Name != "mac-studio" {
-		t.Fatalf("nodes = %#v", got.Mesh.Nodes)
+	if len(got.Coordinator.Nodes) != 2 {
+		t.Fatalf("coordinator nodes = %#v, want local and node-a", got.Coordinator.Nodes)
+	}
+	var node tinkercoord.DashboardNode
+	for _, gotNode := range got.Coordinator.Nodes {
+		if gotNode.ID == "node-a" {
+			node = gotNode
+			break
+		}
+	}
+	if node.Name != "mac-studio" || node.Running != 1 {
+		t.Fatalf("coordinator node = %#v", node)
 	}
 }

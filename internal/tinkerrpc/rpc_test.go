@@ -91,6 +91,23 @@ func TestRegisterNodeAndListNodes(t *testing.T) {
 	if node.GetNodeId() != "node-a" || node.GetName() != "Node A" || node.GetLoad().GetActiveLeases() != 1 {
 		t.Fatalf("node summary = %+v", node)
 	}
+	snap, err := coord.DashboardSnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored tinkercoord.DashboardNode
+	for _, node := range snap.Nodes {
+		if node.ID == "node-a" {
+			stored = node
+			break
+		}
+	}
+	if stored.ID == "" {
+		t.Fatalf("dashboard nodes = %#v, want node-a", snap.Nodes)
+	}
+	if stored.Name != "Node A" || stored.Labels["rack"] != "desk" || stored.Running != 1 {
+		t.Fatalf("stored dashboard node = %#v", stored)
+	}
 }
 
 func TestDrainNodeRequestsDrainOnHeartbeat(t *testing.T) {
