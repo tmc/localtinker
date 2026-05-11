@@ -385,7 +385,8 @@ func TestRecoverUnfinishedFuturesAfterRestart(t *testing.T) {
 }
 
 func TestOperationPanicBecomesSystemErrorFuture(t *testing.T) {
-	c, err := New(Config{Store: tinkerdb.OpenMemory()})
+	store := tinkerdb.OpenMemory()
+	c, err := New(Config{Store: store})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,6 +403,58 @@ func TestOperationPanicBecomesSystemErrorFuture(t *testing.T) {
 	got := eventuallyFutureState(t, c, future.ID, FutureSystemError)
 	if len(got.Error) == 0 {
 		t.Fatal("system error future has no error payload")
+	}
+	attempts, err := store.ListFutureAttempts(context.Background(), future.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 1 {
+		t.Fatalf("attempts = %d, want 1", len(attempts))
+	}
+	if attempts[0].State != FutureSystemError {
+		t.Fatalf("attempt state = %q, want %q", attempts[0].State, FutureSystemError)
+	}
+	if attempts[0].NodeID != localNodeID {
+		t.Fatalf("attempt node = %q, want %q", attempts[0].NodeID, localNodeID)
+	}
+	if len(attempts[0].Error) == 0 {
+		t.Fatal("attempt has no error payload")
+	}
+}
+
+func TestOperationCompleteRecordsAttempt(t *testing.T) {
+	store := tinkerdb.OpenMemory()
+	c, err := New(Config{Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	future, err := c.EnqueueFuture(context.Background(),
+		map[string]any{"type": "forward", "model_id": "model-a"},
+		1,
+		func(context.Context) (any, error) {
+			return map[string]any{"ok": true}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventuallyFutureState(t, c, future.ID, FutureComplete)
+	attempts, err := store.ListFutureAttempts(context.Background(), future.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 1 {
+		t.Fatalf("attempts = %d, want 1", len(attempts))
+	}
+	attempt := attempts[0]
+	if attempt.Attempt != 1 || attempt.NodeID != localNodeID || attempt.State != FutureComplete {
+		t.Fatalf("attempt = {Attempt:%d NodeID:%q State:%q}, want {1 %q %q}", attempt.Attempt, attempt.NodeID, attempt.State, localNodeID, FutureComplete)
+	}
+	if attempt.LeaseID == "" {
+		t.Fatal("attempt lease ID is empty")
+	}
+	if len(attempt.Result) == 0 {
+		t.Fatal("attempt has no result payload")
 	}
 }
 
