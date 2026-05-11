@@ -342,6 +342,108 @@ func TestRunningFutureLeaseExpiry(t *testing.T) {
 	}
 }
 
+func TestRunningFutureLeaseExpiryRequeuesWithAttemptsRemaining(t *testing.T) {
+	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	store := tinkerdb.OpenMemory()
+	c, err := New(Config{
+		Store: store,
+		Now: func() time.Time {
+			return now
+		},
+		LeaseTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	future := tinkerdb.Future{
+		ID:             "fut-running",
+		State:          FutureRunning,
+		CreatedAt:      now.Add(-2 * time.Second),
+		StartedAt:      now.Add(-2 * time.Second),
+		LeaseID:        "lease-a",
+		LeaseExpiresAt: now.Add(-time.Second),
+		Attempt:        1,
+		MaxAttempts:    3,
+		AssignedNodeID: "node-a",
+	}
+	if err := store.PutFuture(context.Background(), future); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.RetrieveFuture(context.Background(), future.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != FutureTryAgain {
+		t.Fatalf("state = %q, want %q", got.State, FutureTryAgain)
+	}
+	stored, err := store.GetFuture(context.Background(), future.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.State != FutureQueued || stored.LeaseID != "" || stored.AssignedNodeID != "" {
+		t.Fatalf("stored future = {State:%q LeaseID:%q AssignedNodeID:%q}, want queued with no lease", stored.State, stored.LeaseID, stored.AssignedNodeID)
+	}
+	if stored.RetryReason != "operation lease expired" || !stored.NextRunAt.Equal(now) {
+		t.Fatalf("retry = {Reason:%q NextRunAt:%v}, want lease expiry at %v", stored.RetryReason, stored.NextRunAt, now)
+	}
+	attempts, err := store.ListFutureAttempts(context.Background(), future.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 1 {
+		t.Fatalf("attempts = %d, want 1", len(attempts))
+	}
+	if attempts[0].State != "lost" || attempts[0].LeaseID != "lease-a" {
+		t.Fatalf("attempt = {State:%q LeaseID:%q}, want lost lease-a", attempts[0].State, attempts[0].LeaseID)
+	}
+}
+
+func TestRunningFutureLeaseExpiryExhaustsAttempts(t *testing.T) {
+	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	store := tinkerdb.OpenMemory()
+	c, err := New(Config{
+		Store: store,
+		Now: func() time.Time {
+			return now
+		},
+		LeaseTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	future := tinkerdb.Future{
+		ID:             "fut-running",
+		State:          FutureRunning,
+		CreatedAt:      now.Add(-2 * time.Second),
+		StartedAt:      now.Add(-2 * time.Second),
+		LeaseID:        "lease-a",
+		LeaseExpiresAt: now.Add(-time.Second),
+		Attempt:        3,
+		MaxAttempts:    3,
+		AssignedNodeID: "node-a",
+	}
+	if err := store.PutFuture(context.Background(), future); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.RetrieveFuture(context.Background(), future.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != FutureSystemError {
+		t.Fatalf("state = %q, want %q", got.State, FutureSystemError)
+	}
+	attempts, err := store.ListFutureAttempts(context.Background(), future.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 1 {
+		t.Fatalf("attempts = %d, want 1", len(attempts))
+	}
+	if attempts[0].State != FutureSystemError {
+		t.Fatalf("attempt state = %q, want %q", attempts[0].State, FutureSystemError)
+	}
+}
+
 func TestRecoverUnfinishedFuturesAfterRestart(t *testing.T) {
 	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 	store := tinkerdb.OpenMemory()
