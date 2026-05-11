@@ -24,7 +24,13 @@ type Server struct {
 type Dashboard struct {
 	GeneratedAt time.Time                     `json:"generated_at"`
 	Coordinator tinkercoord.DashboardSnapshot `json:"coordinator"`
-	Mesh        tinkerrpc.Snapshot            `json:"mesh"`
+	Mesh        DashboardMesh                 `json:"mesh"`
+}
+
+type DashboardMesh struct {
+	CoordinatorID string                        `json:"coordinator_id"`
+	Artifacts     []tinkerrpc.ArtifactSnapshot  `json:"artifacts"`
+	Operations    []tinkerrpc.OperationSnapshot `json:"operations"`
 }
 
 func New(coord *tinkercoord.Coordinator, rpc *tinkerrpc.Server) *Server {
@@ -79,10 +85,15 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	mesh := s.rpc.Snapshot()
 	writeJSON(w, http.StatusOK, Dashboard{
 		GeneratedAt: time.Now().UTC(),
 		Coordinator: coord,
-		Mesh:        s.rpc.Snapshot(),
+		Mesh: DashboardMesh{
+			CoordinatorID: mesh.CoordinatorID,
+			Artifacts:     mesh.Artifacts,
+			Operations:    mesh.Operations,
+		},
 	})
 }
 

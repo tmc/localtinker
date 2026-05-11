@@ -261,6 +261,18 @@ func TestEnqueueFutureSetsRetryAttemptsForIdempotentOperations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fourth, err := c.EnqueueFuture(context.Background(), map[string]any{"type": "sample", "model_id": "model-a", "retryable": true}, 1, func(context.Context) (any, error) {
+		return map[string]any{"ok": true}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fifth, err := c.EnqueueFuture(context.Background(), map[string]any{"type": "sample", "model_id": "model-a"}, 1, func(context.Context) (any, error) {
+		return map[string]any{"ok": true}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for _, tt := range []struct {
 		name string
@@ -270,6 +282,8 @@ func TestEnqueueFutureSetsRetryAttemptsForIdempotentOperations(t *testing.T) {
 		{name: "forward", id: first.ID, want: retryMaxAttempts},
 		{name: "forward_backward", id: second.ID, want: retryMaxAttempts},
 		{name: "optim_step", id: third.ID, want: 0},
+		{name: "seeded sample", id: fourth.ID, want: retryMaxAttempts},
+		{name: "unseeded sample", id: fifth.ID, want: 0},
 	} {
 		got, err := store.GetFuture(context.Background(), tt.id)
 		if err != nil {
@@ -283,6 +297,8 @@ func TestEnqueueFutureSetsRetryAttemptsForIdempotentOperations(t *testing.T) {
 	eventuallyFutureState(t, c, first.ID, FutureComplete)
 	eventuallyFutureState(t, c, second.ID, FutureComplete)
 	eventuallyFutureState(t, c, third.ID, FutureComplete)
+	eventuallyFutureState(t, c, fourth.ID, FutureComplete)
+	eventuallyFutureState(t, c, fifth.ID, FutureComplete)
 }
 
 func TestFutureQueueDispatchesFIFO(t *testing.T) {

@@ -367,6 +367,8 @@ Every terminal failure after retries should include a compact error payload:
 7. **Operational evidence**
    - Add JSONL artifacts for node loss, retry success, retry exhaustion,
      draining, and late completion ignored.
+   - Local retry, lease, cancel, and dashboard-node evidence is recorded in
+     `hosted comparison fixture`.
    - Refresh repository audit and re-audit the scheduler invariants before advertising
      robust multi-node execution.
 

@@ -1,6 +1,7 @@
 package tinkerweb
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -79,9 +80,21 @@ func TestDashboardRoutes(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET dashboard status = %d body = %s", rec.Code, rec.Body.String())
 	}
+	raw := rec.Body.Bytes()
 	var got Dashboard
-	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&got); err != nil {
 		t.Fatal(err)
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	var mesh map[string]json.RawMessage
+	if err := json.Unmarshal(envelope["mesh"], &mesh); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := mesh["nodes"]; ok {
+		t.Fatalf("mesh contains duplicate nodes: %s", mesh["nodes"])
 	}
 	if len(got.Coordinator.Nodes) != 2 {
 		t.Fatalf("coordinator nodes = %#v, want local and node-a", got.Coordinator.Nodes)
