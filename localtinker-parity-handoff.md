@@ -2,17 +2,17 @@
 
 Date: 2026-05-11
 Repo: `/Volumes/tmc/go/src/github.com/tmc/localtinker`
-Current local HEAD: run `git rev-parse HEAD`
-Last NotebookLM-audited local HEAD: `23cf8a8f91760ef0328de7bda48c671e66b537cf`
+Current local HEAD: `d82be0b2e78a728014891b1972c7676c98f00f6c`
+Last NotebookLM-audited local HEAD: `b0286157246033c1b2d7c2fd93172564f12588c0`
 Push: not run
 Notebook ID: `a912d601-badc-409b-bbdb-daf9316b843b`
 
 ## Current Verdict
 
 NotebookLM was refreshed after the archive invalid-token evidence, determinism
-loss-surface correction, and handoff refresh. It reported no remaining local
-implementation or documentation gaps for the documented beta surface at
-`23cf8a8`.
+loss-surface correction, scheduler retry bridge, and dashboard source-of-truth
+cleanup. It reported no remaining local implementation gaps for the documented
+beta surface at `b028615`.
 After a hosted API key was supplied, a follow-up probe pass recorded live hosted
 rows for policy losses, fractional dense weights, sampler output, optimizer
 metrics/resume shape, owner-side archive signed URLs, and raw cancel-future
@@ -20,15 +20,16 @@ route shape. No key or signed URL value was written to artifacts.
 
 Synced notebook sources:
 
-- `repo: localtinker` -> `9218ab3c-4a9c-44f9-ac38-d678479bade4`
+- `repo: localtinker` -> refreshed after `d82be0b`; run `nlm source list` for
+  the current source ID.
 - `localtinker-sdk-parity-status.md` -> `7254d15f-68ed-4b97-8f54-cacf187266ff`
 - `repo: tinker sdk` -> `7c9465b0-2583-48ba-a288-e7ab5ff8e3b2`
 
-The latest NotebookLM chat (`5e9f8b73-a826-4f7c-884f-fb885db0eed9`) answered
-that no open local gaps remain, all known built-in loss methods execute
-locally, only `cross_entropy` is intentionally advertised as hosted-compatible,
-and the archive invalid-token artifact is not valid second-principal
-cross-owner denial evidence.
+The latest NotebookLM chat (`672c77d3-3664-4a3c-9fee-90c699aca483`) answered
+that no open local implementation gaps remain, all known built-in loss methods
+execute locally, only `cross_entropy` is intentionally advertised as
+hosted-compatible, and the archive invalid-token artifact is not valid
+second-principal cross-owner denial evidence.
 
 Closed locally:
 
@@ -106,11 +107,12 @@ jq -c . docs/internal/hosted-comparison/20260511-55ffaf5-optimizer-metrics-hoste
 MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOWORK=off go test ./internal/tinkertrain -run 'TestOptimizerStateRoundTrip|TestManagerLoadStateWithOptimizer|TestCheckpointMetadataJSON' -count=1
 MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOWORK=off go test ./internal/tinkerhttp -run 'TestForwardBackwardAndOptimStepTune' -count=1 -timeout=3m
 MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOWORK=off go test ./internal/tinkertrain ./internal/tinkerhttp ./internal/tinkercoord ./tinker -run 'TestDensePolicyLossesReturnWeightedSumAndLogprobs|TestDenseCrossEntropyReturnsWeightedLossAndLogprobs|TestTrainingInputValidation(AcceptsPolicyLossInputs|AcceptsPolicyLossConfig|RejectsPolicyLossConfig|RejectsPolicyLossInputs)$|TestCapabilitiesAdvertiseSamplerConformance|TestCapabilitiesReportHostedCompatibleLosses' -count=1
+MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./... -count=1
 ```
 
-The broad `cmd/localtinker` package path can enter the known long-running
-`sdk_custom_loss.py` smoke path. Use the focused SDK malformed-input gate above
-for this parity slice unless the user explicitly asks for a full smoke run.
+The broad `go test ./...` gate passed at `872fde0` after installing `torch`
+into the local Tinker SDK venv used by `cmd/localtinker` script tests. No repo
+files were changed by that environment fix.
 
 ## Next Action
 

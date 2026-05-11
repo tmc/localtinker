@@ -768,14 +768,18 @@ func (c *Coordinator) CreateSamplingSession(ctx context.Context, sessionID strin
 }
 
 func (c *Coordinator) Sample(ctx context.Context, req tinkertrain.SampleRequest) (Future, error) {
-	out, err := c.train.Sample(ctx, req)
-	if err != nil {
-		return c.UserErrorFuture(ctx, err.Error())
-	}
-	return c.CompleteFuture(ctx, out, map[string]any{
+	future, err := c.EnqueueFuture(ctx, map[string]any{
 		"type":                "sample",
 		"sampling_session_id": req.SamplingSessionID,
+		"seed":                req.SamplingParams.Seed,
+		"retryable":           req.SamplingParams.Seed != 0,
+	}, requestBytes(req), func(ctx context.Context) (any, error) {
+		return c.train.Sample(ctx, req)
 	})
+	if err != nil {
+		return Future{}, err
+	}
+	return c.waitFuture(ctx, future.ID)
 }
 
 func (c *Coordinator) SetCheckpointPublic(ctx context.Context, path string, public bool) error {
@@ -951,8 +955,9 @@ func (c *Coordinator) EnqueueFuture(ctx context.Context, metadata any, requestBy
 		return Future{}, err
 	}
 	var meta struct {
-		Type    string `json:"type"`
-		ModelID string `json:"model_id"`
+		Type      string `json:"type"`
+		ModelID   string `json:"model_id"`
+		Retryable bool   `json:"retryable"`
 	}
 	_ = json.Unmarshal(metadataJSON, &meta)
 	future := tinkerdb.Future{
@@ -963,7 +968,7 @@ func (c *Coordinator) EnqueueFuture(ctx context.Context, metadata any, requestBy
 		Operation:    meta.Type,
 		ModelID:      meta.ModelID,
 		RequestBytes: requestBytes,
-		MaxAttempts:  maxAttempts(meta.Type),
+		MaxAttempts:  maxAttempts(meta.Type, meta.Retryable),
 	}
 	if err := c.store.PutFuture(ctx, future); err != nil {
 		return Future{}, err
@@ -972,10 +977,15 @@ func (c *Coordinator) EnqueueFuture(ctx context.Context, metadata any, requestBy
 	return fromDBFuture(future), nil
 }
 
-func maxAttempts(operation string) int {
+func maxAttempts(operation string, retryable bool) int {
 	switch operation {
 	case "forward", "forward_backward":
 		return retryMaxAttempts
+	case "sample":
+		if retryable {
+			return retryMaxAttempts
+		}
+		return 0
 	default:
 		return 0
 	}
@@ -993,6 +1003,27 @@ func (c *Coordinator) startOperation(id string, run operationFunc) {
 	c.runs[id] = run
 	c.dispatchLocked()
 	c.mu.Unlock()
+}
+
+func (c *Coordinator) waitFuture(ctx context.Context, id string) (Future, error) {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		future, err := c.store.GetFuture(ctx, id)
+		if err != nil {
+			return Future{}, err
+		}
+		switch future.State {
+		case FutureQueued, FutureRunning:
+		default:
+			return fromDBFuture(future), nil
+		}
+		select {
+		case <-ctx.Done():
+			return Future{}, ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func (c *Coordinator) dispatchLocked() {
