@@ -35,9 +35,14 @@
   and the next `optim_step` consumes exactly that pending batch at
   `internal/tinkertrain/mlx.go:168`. Within a batch, rows keep input order
   (`internal/tinkertrain/mlx.go:586`).
-- Loss. Only `cross_entropy` is accepted
-  (`internal/tinkertrain/mlx.go:579`); weighted mean reduction at
-  `internal/tinkertrain/mlx.go:816`.
+- Loss. Local execution accepts `cross_entropy`, `importance_sampling`,
+  `ppo`, `cispo`, and `dro` (`internal/tinkertrain/mlx.go:596`).
+  `cross_entropy` uses weighted mean reduction at
+  `internal/tinkertrain/mlx.go:988`; policy losses use `logprobs`,
+  `advantages`, weights, and loss-specific config at
+  `internal/tinkertrain/mlx.go:1015`. PPO/CISPO clip thresholds and
+  DRO beta are parsed from `LossFnConfig` at
+  `internal/tinkertrain/mlx.go:658`.
 - MLX backend. Selected at link time via `MLX_LIB_PATH`. Execution flags
   (`FastSDPA`, `FastRoPE`) set at `internal/tinkertrain/mlx.go:81`.
 - Checkpoint root. `LOCALTINKER_CHECKPOINT_ROOT`
