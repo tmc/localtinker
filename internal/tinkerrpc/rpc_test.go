@@ -18,7 +18,14 @@ import (
 
 func newTestRPC(t *testing.T) *Server {
 	t.Helper()
-	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	rpc, _ := newTestRPCWithStore(t)
+	return rpc
+}
+
+func newTestRPCWithStore(t *testing.T) (*Server, *tinkerdb.JSONStore) {
+	t.Helper()
+	store := tinkerdb.OpenMemory()
+	coord, err := tinkercoord.New(tinkercoord.Config{Store: store})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +33,7 @@ func newTestRPC(t *testing.T) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return rpc
+	return rpc, store
 }
 
 func operationSnapshot(t *testing.T, snap Snapshot, id string) OperationSnapshot {
@@ -588,7 +595,9 @@ func TestCancelOperationRevokesLeaseOnWatch(t *testing.T) {
 	if run.GetRun() == nil || run.GetOperationId() != opID {
 		t.Fatalf("run command = %+v, want operation %s", run, opID)
 	}
-	if !rpc.CancelOperation(opID, "test cancel") {
+	if ok, err := rpc.CancelOperation(opID, "test cancel"); err != nil {
+		t.Fatal(err)
+	} else if !ok {
 		t.Fatal("CancelOperation returned false")
 	}
 	revoke, err := rpc.watchCommand("node-a")
@@ -613,8 +622,29 @@ func TestCancelOperationRevokesLeaseOnWatch(t *testing.T) {
 	}
 }
 
-func TestCanceledOperationTerminalReportQueuesAck(t *testing.T) {
+func TestCancelQueuedOperationMarksDurableFutureCanceled(t *testing.T) {
 	rpc := newTestRPC(t)
+	opID, err := rpc.EnqueueOperation("forward", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := rpc.CancelOperation(opID, "queued cancel"); err != nil {
+		t.Fatal(err)
+	} else if !ok {
+		t.Fatal("CancelOperation returned false")
+	}
+	coordSnap, err := rpc.coord.DashboardSnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	future := dashboardFutureByID(t, coordSnap, opID)
+	if future.State != tinkercoord.FutureCanceled || future.ErrorBytes == 0 {
+		t.Fatalf("future = %#v, want durable canceled future with error payload", future)
+	}
+}
+
+func TestCanceledOperationTerminalReportQueuesAck(t *testing.T) {
+	rpc, store := newTestRPCWithStore(t)
 	rpc.nodes["node-a"] = &nodeState{
 		state:     nodeHealthy,
 		load:      &tinkerv1.NodeLoad{},
@@ -628,7 +658,9 @@ func TestCanceledOperationTerminalReportQueuesAck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !rpc.CancelOperation(opID, "test cancel") {
+	if ok, err := rpc.CancelOperation(opID, "test cancel"); err != nil {
+		t.Fatal(err)
+	} else if !ok {
 		t.Fatal("CancelOperation returned false")
 	}
 	if _, err := rpc.watchCommand("node-a"); err != nil {
@@ -649,6 +681,21 @@ func TestCanceledOperationTerminalReportQueuesAck(t *testing.T) {
 	if got.State != operationFailed || got.LastErrorCode != "canceled" || !got.AckPending {
 		t.Fatalf("operation snapshot = %+v, want canceled failure with ack pending", got)
 	}
+	coordSnap, err := rpc.coord.DashboardSnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	future := dashboardFutureByID(t, coordSnap, opID)
+	if future.State != tinkercoord.FutureCanceled || future.ErrorBytes == 0 {
+		t.Fatalf("future = %#v, want durable canceled future with error payload", future)
+	}
+	attempts, err := store.ListFutureAttempts(context.Background(), opID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 1 || attempts[0].State != tinkercoord.FutureCanceled || attempts[0].LeaseID != cmd.GetLeaseId() {
+		t.Fatalf("attempts = %#v, want one canceled attempt for lease %q", attempts, cmd.GetLeaseId())
+	}
 	ack, err := rpc.watchCommand("node-a")
 	if err != nil {
 		t.Fatal(err)
@@ -658,8 +705,57 @@ func TestCanceledOperationTerminalReportQueuesAck(t *testing.T) {
 	}
 }
 
+func TestReportFailedOperationMarksDurableFutureSystemError(t *testing.T) {
+	rpc, store := newTestRPCWithStore(t)
+	rpc.nodes["node-a"] = &nodeState{
+		state:     nodeHealthy,
+		load:      &tinkerv1.NodeLoad{},
+		artifacts: make(map[string]*tinkerv1.ArtifactInventory),
+	}
+	opID, err := rpc.EnqueueOperation("forward", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := rpc.watchCommand("node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rpc.applyNodeEvent(&tinkerv1.NodeEvent{
+		NodeId:      "node-a",
+		CommandId:   cmd.GetCommandId(),
+		LeaseId:     cmd.GetLeaseId(),
+		OperationId: opID,
+		Kind:        cmd.GetKind(),
+		Payload: &tinkerv1.NodeEvent_Failed{Failed: &tinkerv1.OperationFailed{
+			Error: &tinkerv1.ErrorInfo{Code: "worker_failed", Message: "boom"},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snap := rpc.Snapshot()
+	got := operationSnapshot(t, snap, opID)
+	if got.State != operationFailed || got.LastErrorCode != "worker_failed" || !got.AckPending {
+		t.Fatalf("operation snapshot = %+v, want failed with ack pending", got)
+	}
+	coordSnap, err := rpc.coord.DashboardSnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	future := dashboardFutureByID(t, coordSnap, opID)
+	if future.State != tinkercoord.FutureSystemError || future.ErrorBytes == 0 {
+		t.Fatalf("future = %#v, want durable system_error future with error payload", future)
+	}
+	attempts, err := store.ListFutureAttempts(context.Background(), opID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 1 || attempts[0].State != tinkercoord.FutureSystemError || attempts[0].LeaseID != cmd.GetLeaseId() {
+		t.Fatalf("attempts = %#v, want one system_error attempt for lease %q", attempts, cmd.GetLeaseId())
+	}
+}
+
 func TestReportTerminalOperationQueuesAck(t *testing.T) {
-	rpc := newTestRPC(t)
+	rpc, store := newTestRPCWithStore(t)
 	rpc.nodes["node-a"] = &nodeState{
 		state:     nodeHealthy,
 		load:      &tinkerv1.NodeLoad{},
@@ -705,6 +801,13 @@ func TestReportTerminalOperationQueuesAck(t *testing.T) {
 	future := dashboardFutureByID(t, coordSnap, opID)
 	if future.State != tinkercoord.FutureComplete {
 		t.Fatalf("future = %#v, want durable complete state", future)
+	}
+	attempts, err := store.ListFutureAttempts(context.Background(), opID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 1 || attempts[0].State != tinkercoord.FutureComplete || attempts[0].LeaseID != cmd.GetLeaseId() {
+		t.Fatalf("attempts = %#v, want one complete attempt for lease %q", attempts, cmd.GetLeaseId())
 	}
 	ack, err := rpc.watchCommand("node-a")
 	if err != nil {

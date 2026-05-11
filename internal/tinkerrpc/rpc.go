@@ -260,31 +260,43 @@ func (s *Server) EnqueueOperation(kind string, payloadJSON []byte, model *tinker
 }
 
 // CancelOperation asks the node holding opID's lease to revoke it.
-func (s *Server) CancelOperation(opID, reason string) bool {
+func (s *Server) CancelOperation(opID, reason string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	op := s.operations[opID]
 	if op == nil {
-		return false
+		return false, nil
 	}
 	switch op.state {
 	case operationQueued:
 		op.state = operationCanceled
 		op.lastErrorCode = "canceled"
 		op.lastError = reason
-		return true
+		if _, err := s.coord.CancelFuture(context.Background(), opID); err != nil {
+			return false, err
+		}
+		return true, nil
 	case operationLeased, operationRunning:
 		if reason == "" {
 			reason = "operation canceled"
+		}
+		errJSON, err := json.Marshal(map[string]any{"code": "canceled", "message": reason})
+		if err != nil {
+			return false, err
+		}
+		if _, ok, err := s.coord.FinishFutureLease(context.Background(), op.id, op.leaseID, tinkercoord.FutureCanceled, nil, errJSON, s.now().UTC()); err != nil {
+			return false, err
+		} else if !ok {
+			return false, nil
 		}
 		op.state = operationCanceled
 		op.lastErrorCode = "canceled"
 		op.lastError = reason
 		op.revokePending = true
 		op.revokeReason = reason
-		return true
+		return true, nil
 	default:
-		return false
+		return false, nil
 	}
 }
 
@@ -536,7 +548,9 @@ func (s *Server) Watch(ctx context.Context, req *connect.Request[tinkerv1.WatchR
 func (s *Server) watchCommand(nodeID string) (*tinkerv1.NodeCommand, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.expireOperationLeasesLocked()
+	if err := s.expireOperationLeasesLocked(); err != nil {
+		return nil, err
+	}
 	node := s.nodes[nodeID]
 	if node == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("unknown node"))
@@ -709,7 +723,7 @@ func (s *Server) operationAssignmentCountsLocked() map[string]int {
 	return counts
 }
 
-func (s *Server) expireOperationLeasesLocked() {
+func (s *Server) expireOperationLeasesLocked() error {
 	now := s.now().UTC()
 	for _, op := range s.operations {
 		switch op.state {
@@ -720,7 +734,11 @@ func (s *Server) expireOperationLeasesLocked() {
 		if op.deadline.IsZero() || op.deadline.After(now) {
 			continue
 		}
-		_, _, _ = s.coord.RequeueFutureLease(context.Background(), op.id, op.leaseID, "operation lease expired", now, now)
+		if _, ok, err := s.coord.RequeueFutureLease(context.Background(), op.id, op.leaseID, "operation lease expired", now, now); err != nil {
+			return connect.NewError(connect.CodeInternal, err)
+		} else if !ok {
+			continue
+		}
 		op.state = operationQueued
 		op.nodeID = ""
 		op.commandID = ""
@@ -728,6 +746,7 @@ func (s *Server) expireOperationLeasesLocked() {
 		op.deadline = time.Time{}
 		s.operationQueue = append(s.operationQueue, op.id)
 	}
+	return nil
 }
 
 func (s *Server) nextSeqLocked() int64 {
@@ -802,7 +821,9 @@ func (s *Server) applyNodeEvent(event *tinkerv1.NodeEvent) error {
 			load.QueuedOperations--
 		}
 	case event.GetCompleted() != nil || event.GetFailed() != nil:
-		s.operationTerminalLocked(event)
+		if err := s.operationTerminalLocked(event); err != nil {
+			return err
+		}
 		load := nodeLoad(node)
 		if load.ActiveLeases > 0 {
 			load.ActiveLeases--
@@ -820,10 +841,10 @@ func (s *Server) operationStartedLocked(event *tinkerv1.NodeEvent) {
 	op.startedAt = s.eventTime(event)
 }
 
-func (s *Server) operationTerminalLocked(event *tinkerv1.NodeEvent) {
+func (s *Server) operationTerminalLocked(event *tinkerv1.NodeEvent) error {
 	op := s.matchOperationLocked(event)
 	if op == nil {
-		return
+		return nil
 	}
 	op.completedAt = s.eventTime(event)
 	op.deadline = time.Time{}
@@ -834,9 +855,7 @@ func (s *Server) operationTerminalLocked(event *tinkerv1.NodeEvent) {
 		if op.lastError == "" {
 			op.lastError = "operation canceled"
 		}
-		errJSON, _ := json.Marshal(map[string]any{"code": "canceled", "message": op.lastError})
-		_, _, _ = s.coord.FinishFutureLease(context.Background(), op.id, op.leaseID, tinkercoord.FutureCanceled, nil, errJSON, op.completedAt)
-		return
+		return nil
 	}
 	if failed := event.GetFailed(); failed != nil {
 		op.state = operationFailed
@@ -844,20 +863,34 @@ func (s *Server) operationTerminalLocked(event *tinkerv1.NodeEvent) {
 			op.lastErrorCode = err.GetCode()
 			op.lastError = err.GetMessage()
 		}
-		errJSON, _ := json.Marshal(map[string]any{"code": op.lastErrorCode, "message": op.lastError})
-		_, _, _ = s.coord.FinishFutureLease(context.Background(), op.id, op.leaseID, tinkercoord.FutureSystemError, nil, errJSON, op.completedAt)
-		return
+		errJSON, err := json.Marshal(map[string]any{"code": op.lastErrorCode, "message": op.lastError})
+		if err != nil {
+			return connect.NewError(connect.CodeInternal, err)
+		}
+		if _, ok, err := s.coord.FinishFutureLease(context.Background(), op.id, op.leaseID, tinkercoord.FutureSystemError, nil, errJSON, op.completedAt); err != nil {
+			return connect.NewError(connect.CodeInternal, err)
+		} else if !ok {
+			return connect.NewError(connect.CodeFailedPrecondition, errors.New("stale operation lease"))
+		}
+		return nil
 	}
-	op.state = operationComplete
-	op.lastErrorCode = ""
-	op.lastError = ""
 	var result json.RawMessage
 	if completed := event.GetCompleted(); completed != nil && completed.GetResult() != nil {
 		if raw, err := protojson.Marshal(completed.GetResult()); err == nil {
 			result = raw
+		} else {
+			return connect.NewError(connect.CodeInternal, err)
 		}
 	}
-	_, _, _ = s.coord.FinishFutureLease(context.Background(), op.id, op.leaseID, tinkercoord.FutureComplete, result, nil, op.completedAt)
+	if _, ok, err := s.coord.FinishFutureLease(context.Background(), op.id, op.leaseID, tinkercoord.FutureComplete, result, nil, op.completedAt); err != nil {
+		return connect.NewError(connect.CodeInternal, err)
+	} else if !ok {
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("stale operation lease"))
+	}
+	op.state = operationComplete
+	op.lastErrorCode = ""
+	op.lastError = ""
+	return nil
 }
 
 func (s *Server) matchOperationLocked(event *tinkerv1.NodeEvent) *operationState {
