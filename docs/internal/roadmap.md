@@ -189,19 +189,32 @@ Goal: keep local behavior honest against hosted Tinker.
 
 ## Known Gaps
 
-- Hosted scheduler timing and operation-level backpressure have not been
-  compared.
-- Arbitrary non-prefix fractional weights are not fully supported.
-- Checkpoint archive URLs are local HTTP download URLs; hosted download and
-  ownership enforcement remain incomplete.
-- Hosted numerics and local MLX numerics will differ.
+- Hosted scheduler timing, operation-level backpressure, and cancellation are
+  local-only or SDK-surface evidence so far. Local queue/cancel behavior is
+  pinned, and `docs/internal/hosted-comparison/20260511-0480f94-{cancel-future,queue-backpressure}-local.jsonl`
+  records the hosted credential blocker.
+- Policy losses `importance_sampling`, `ppo`, `cispo`, and `dro` execute
+  locally and are covered by local JSONL rows. Hosted policy-loss evidence is
+  still blocked on `TINKER_API_KEY` and `TINKER_BASE_URL`.
+- Checkpoint archive URLs are local HTTP download URLs. Local owner,
+  visibility, expiration, and private/public state are pinned, but hosted
+  signed URL shape and cross-owner authorization evidence require hosted
+  credentials plus a second principal token.
+- Hosted numerics and local MLX numerics will differ. Sampler distribution and
+  optimizer metric equivalence remain hosted-evidence gaps, not local
+  implementation gaps.
 
 ## Next Milestones
 
-1. Expand SDK conformance tests for all currently supported routes.
-2. Compare dense CE losses and logprobs against a hosted run.
-3. Add hosted-style checkpoint download ownership and retention enforcement.
-4. Compare local queue state and cancellation behavior against hosted futures.
+1. When hosted credentials are available, run the hosted probes in
+   `/tmp/localtinker-hosted-probe-resume-21D23B54.md` and replace blocker rows
+   with real hosted evidence rows.
+2. Compare hosted/local sampler distributions across fixed prompts, seeds,
+   temperature, top-p, and top-k.
+3. Compare hosted/local optimizer metrics and resume behavior after
+   `optim_step`.
+4. Probe hosted checkpoint signed URL shape and private cross-owner archive
+   denial with a second hosted principal.
 5. MLX library setup (`MLX_LIB_PATH`) for clean checkouts is documented in
    `docs/mlx-setup.md` and referenced from the README.
 6. Deterministic sampler tests over a small cached model: covered by

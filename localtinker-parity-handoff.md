@@ -1,214 +1,114 @@
 # LocalTinker SDK Parity Handoff
 
-Date: 2026-05-05
+Date: 2026-05-11
 Repo: `/Volumes/tmc/go/src/github.com/tmc/localtinker`
-Current HEAD: see `git rev-parse --short HEAD`
+Current local HEAD: `dc2de0b179cf34d6b152c573d75709f3da4bfba0`
+Push: not run
 Notebook ID: `a912d601-badc-409b-bbdb-daf9316b843b`
 
-Do not push.
+## Current Verdict
 
-## Objective
+NotebookLM was refreshed at HEAD `dc2de0b` and reported no remaining local
+implementation gaps for the documented beta surface.
 
-Continue the loop:
+Synced notebook sources:
 
-1. Sync the current repo and a short status note into NotebookLM.
-2. Ask NotebookLM for a strict `COMPLETE` / `NOT COMPLETE` parity verdict.
-3. If `NOT COMPLETE`, verify the cited claim against the current repo and upstream SDK.
-4. Implement or coordinate exactly the next focused action.
-5. Run focused tests or artifacts as needed.
-6. Commit clean atomic changes, no push.
-7. Repeat until NotebookLM says `COMPLETE`.
+- `repo: localtinker` -> `8a6ab604-fb18-49d1-9ce1-9bcc3a050ea8`
+- `localtinker-sdk-parity-status.md` -> `891817ed-dd77-4a56-b89c-7de6b342c098`
+- `repo: tinker sdk` -> `7c9465b0-2583-48ba-a288-e7ab5ff8e3b2`
 
-## Hard Rules
+Closed locally:
 
-- Do not push.
-- Do not run `go clean -cache`, `chmod`, `rm`, or modify `/Users/tmc/go/pkg/mod/golang.org/toolchain` or the shared Go cache.
-- Tests are now approved, but keep using isolated cache:
-  `GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) ...`
-- Broad gate has already passed once:
-  `GOCACHE=/tmp/localtinker-gocache.AsjiEe GOWORK=off go test ./...`
-- Do not stage binary files.
-- Before staging/committing:
-  `git status --short`
-  `git diff --cached --name-status`
-- Prefer scoped staging or `git commit --only`.
-- Try `~/bin/git-auto-commit-message --auto` first. It has been failing because `ANTHROPIC_API_KEY` is unset; fallback manual commit messages have been used.
-- Add git notes after commits with commit hash, date, agent, model, tty, pid, and `ITERM_SESSION_ID`.
+- Parse/multimodal boundary. Image and `image_asset_pointer` chunks parse and
+  validate, then fail with typed MLX-executor errors because no local vision
+  backend or production image asset store is configured.
+- CSR sparse `target_tokens` and `weights`. Both the direct Go API and HTTP
+  path rehydrate them through `tinkertrain.RehydrateCSR`; unsupported sparse
+  tensor names are rejected before MLX execution.
+- Stop shape validation. Invalid object, mixed, nested, negative, and
+  fractional stop token shapes are rejected at the parse boundary.
+- Policy loss execution. `cross_entropy`, `importance_sampling`, `ppo`,
+  `cispo`, and `dro` execute locally; policy losses report `loss:sum`.
+- Image asset extension point. `tinkertrain.ImageAssetResolver` is reachable
+  through programmatic HTTP wiring.
+- Local queue, cancel, checkpoint archive metadata, and archive visibility
+  behavior are covered by focused tests and JSONL artifacts.
 
-## Current State
+Open hosted-evidence gaps:
 
-Current local tree:
+- Policy loss response shapes for hosted `importance_sampling`, `ppo`, `cispo`,
+  and `dro`.
+- Hosted cancel future behavior.
+- Hosted scheduler timing and operation backpressure.
+- Hosted checkpoint signed URL shape and private cross-owner archive denial.
+- Hosted/local sampler distribution comparison.
+- Hosted/local optimizer metrics and resume equivalence.
 
-- HEAD: see `git rev-parse --short HEAD`
-- Check `git status --short` before acting.
-- This handoff file is committed; update it only when the workflow materially changes.
+These are blocked in the current shell because no hosted credential source is
+available:
 
-Notebook sources before this handoff:
+- `TINKER_API_KEY` is absent.
+- `TINKER_BASE_URL` is absent.
+- `TINKER_CREDENTIAL_CMD` is absent.
+- Candidate second-principal variables for archive auth are absent.
+- Keychain and local password-manager checks did not find a usable credential.
 
-- `repo: localtinker` source: `7dd306c1-efac-4cd4-8d36-10fc3818fbb4`
-- `localtinker-sdk-parity-status.md` source: `323aa0c2-76ba-4323-bafb-7307e86f249f`
-- `repo: tinker sdk` source: `7c9465b0-2583-48ba-a288-e7ab5ff8e3b2`
+## Evidence Artifacts
 
-Important: keep this file current if HEAD moves; resync NotebookLM before acting on any older verdict.
+Current in-repo artifacts:
 
-## Landed Parity Work
+- `docs/internal/hosted-comparison/20260511-0480f94-policy-losses-hosted-local.jsonl`
+- `docs/internal/hosted-comparison/20260511-0480f94-cancel-future-local.jsonl`
+- `docs/internal/hosted-comparison/20260511-0480f94-queue-backpressure-local.jsonl`
+- `docs/internal/hosted-comparison/20260511-0480f94-archive-auth-signed-url-local.jsonl`
+- `docs/internal/hosted-comparison/20260508-e51c8f6-archive-visibility-local.jsonl`
+- `docs/internal/hosted-comparison/20260508-e51c8f6-fractional-weights-local.jsonl`
 
-Recent relevant commits:
+Coordinator handoffs:
 
-- `cbea8b0 docs: record broad packaging gate`
-- `369a63f docs: record hosted cancel blocker`
-- `46be27e docs: record dense ce parity`
-- `5aa72d5 docs: add dense ce hosted comparison`
-- `497eb1c tinkerhttp: add sampler rest lookup`
-- `4fa0eac docs: record custom loss parity`
-- `a2c0052 docs: add custom loss hosted comparison`
-- `ecc480f tinkertrain: support sdk custom loss forward`
-- `b4716ac docs: update sdk parity caveats`
-- `dd9f001 docs: normalize sampler comparison shape`
+- Final gap analysis: `/tmp/localtinker-final-gap-analysis-21D23B54.md`
+- Hosted probe resume runbook:
+  `/tmp/localtinker-hosted-probe-resume-21D23B54.md`
+- Preserved stale worktree patch:
+  `/tmp/localtinker-wt-betadocs-dirty-20260511T051213Z.patch`
 
-Covered:
-
-- Top-k prompt logprobs.
-- Hosted/local sampler comparison shape normalization.
-- Multimodal chunk rejection.
-- Checkpoint metadata/archive shape evidence.
-- Custom loss support and hosted/local artifact.
-- SDK `get_sampler` REST lookup and fixture coverage.
-- Dense CE hosted/local artifact and docs.
-- Hosted cancel absence documented.
-- Broad packaging gate passed and recorded in docs.
-- Hosted-comparison metadata scrubbed.
-- Current test evidence refreshed.
-
-## Latest NotebookLM Verdict
-
-The latest NotebookLM answer at `544d941` said `NOT COMPLETE` and proposed:
-
-- Implement missing REST route mapping for `get_training_run_by_tinker_path`.
-- Files suggested:
-  - `cmd/localtinker/testdata/sdk_smoke.txt`
-  - `internal/tinkerhttp/routes_test.go`
-- Suggested focused test:
-  `GOWORK=off go test ./internal/tinkerhttp -run TestGetTrainingRunByTinkerPath -count=1`
-
-The SDK method parses the tinker path client-side and calls
-`GET /api/v1/training_runs/{training_run_id}`. The current patch adds focused
-coverage proving that path instead of adding a nonexistent SDK route.
-
-Useful upstream SDK lookup:
+## Validation Already Run
 
 ```sh
-rg -n "get_training_run_by_tinker_path|training_run_by_tinker_path|tinker_path" /Volumes/tmc/go/src/github.com/thinking-machines-lab/tinker/src/tinker
+jq -c . docs/internal/hosted-comparison/20260511-0480f94-*.jsonl
+git diff --check
+GOWORK=off go test ./internal/tinkercoord -run 'TestFutureQueueBoundsConcurrency|TestFutureQueueDispatchesFIFO' -count=1
+GOWORK=off go test ./internal/tinkerhttp -run 'TestRetrieveFutureRoute|TestCancelFutureRoute' -count=1
+MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./internal/tinkerhttp -run '^(TestCheckpointRoutes|TestCheckpointArchiveAuthorization|TestExpiredCheckpointIsHiddenAndArchiveGone)$' -count=1
+MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOWORK=off go test ./cmd/localtinker -run 'TestPythonSDKScript/sdk_malformed_inputs' -count=1 -timeout=90s
+GOWORK=off go test ./internal/tinkertrain ./internal/tinkerhttp -run 'TestDatumTargetsRehydratesSparse|TestDatumWeightsRehydratesSparse|TestNormalizeTensorDataRehydratesNamedSparse|TestDenseCrossEntropyFractionalWeights|TestDensePolicyLossesReturnWeightedSumAndLogprobs|TestMultimodalChunkParsesAndCounts|TestMultimodalExecutionRejected|TestImageChunkHeaderValidation' -count=1
 ```
 
-Useful local lookup:
+The broad `cmd/localtinker` package path can enter the known long-running
+`sdk_custom_loss.py` smoke path. Use the focused SDK malformed-input gate above
+for this parity slice unless the user explicitly asks for a full smoke run.
 
-```sh
-rg -n "training_runs|tinker_path|get_training_run" internal/tinkerhttp internal/tinkercoord docs cmd/localtinker/testdata
-```
+## Next Action When Credentials Exist
 
-## Notebook Sync Commands
+Run `/tmp/localtinker-hosted-probe-resume-21D23B54.md`.
 
-Use current HEAD:
+Do not print secret values. Record only scrubbed hosted metadata in JSONL. Keep
+commits local unless the user explicitly asks to push.
 
-```sh
-git status --short
-git rev-parse --short HEAD
-nlm source sync --force -n 'repo: localtinker' a912d601-badc-409b-bbdb-daf9316b843b .
-```
+## Worktree Cleanup
 
-Create a short status source at `/tmp/localtinker-sdk-parity-status.md`, then sync:
+Main worktree is clean at `dc2de0b`.
 
-```sh
-nlm source sync --force -n 'localtinker-sdk-parity-status.md' a912d601-badc-409b-bbdb-daf9316b843b /tmp/localtinker-sdk-parity-status.md
-```
+One leftover worktree remains:
 
-Ask:
+- `/Volumes/tmc/go/src/github.com/tmc/localtinker-wt-betadocs`
+- branch: `parity-beta-docs`
+- no commits ahead of `main`
+- dirty files:
+  - `docs/internal/conformance.md`
+  - `docs/internal/roadmap.md`
+  - `localtinker-parity-handoff.md`
 
-```sh
-nlm generate-chat a912d601-badc-409b-bbdb-daf9316b843b "STRICT MODE: Based only on current sources and latest status at HEAD $(git rev-parse --short HEAD), is LocalTinker now complete for publicizing as a local SDK-compatible beta with documented hosted-only differences? Answer COMPLETE or NOT COMPLETE. If NOT COMPLETE, give exactly one next concrete focused implementation/artifact/test action with files and commands. Do not repeat already-documented hosted cancel absence or already-passing broad packaging gate unless current sources prove the status is false."
-```
-
-## Test Commands Already Run
-
-Broad gate passed:
-
-```sh
-GOCACHE=/tmp/localtinker-gocache.AsjiEe GOWORK=off go test ./...
-```
-
-Earlier equivalent command run by 3E3B:
-
-```sh
-GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off /Users/tmc/.local/homebrew/bin/go test ./...
-```
-
-Package results included:
-
-- `cmd/localtinker` ok
-- `cmd/localtinker-node` ok
-- `cmd/localtinker-tray` ok
-- `internal/tinkercoord` ok
-- `internal/tinkerhttp` ok
-- `internal/tinkertrain` ok
-- `tinker` ok
-
-## Lane Coordination
-
-Session IDs:
-
-- 3E3B101A: sampling/logprobs/current orchestrator
-- A773080F: hosted credentials and hosted/local artifacts
-- ACDCF211: conformance/docs
-- BC1565BF: CE/tinkertrain/MLX
-- FDF74F3B: scheduler replacement, but it has been unresponsive to `it2 send-text`
-- 8860ECF4: node/runtime
-
-Broadcast pattern:
-
-```sh
-it2 session send-text <SID> "/goal <goal text>"
-it2 session send-text <SID> $'\r'
-```
-
-If expecting a reply:
-
-```sh
-MY_SID=$(it2 session current)
-it2 session send-text <TARGET_SID> "Question.
-
-RESPOND: it2 session send-text $MY_SID \"brief answer\"
-FORMAT: brief text with files/commit hashes if relevant"
-```
-
-## Hosted Cancel Evidence
-
-A773 could not produce the requested hosted/local queue-cancel artifact honestly:
-
-- Hosted SDK/generated client exposes retrieve-only futures.
-- Hosted `/api/v1/cancel_future` returned 404.
-- Plausible alternate cancel routes returned 404.
-- Hosted submitted request reached `complete_metadata`, not terminal `canceled`.
-- Local cancellation evidence exists but is not equivalent hosted/local parity.
-
-Evidence files:
-
-- `/tmp/queue-cancel-hosted-46be27e.jsonl`
-- `/tmp/queue-cancel-local-46be27e.jsonl`
-
-This is documented in `docs/internal/conformance.md` by `369a63f`.
-
-## Next Best Step
-
-1. Sync NotebookLM at the current HEAD.
-2. Ask strict verdict again.
-3. If the current `get_training_run_by_tinker_path` patch is not committed yet,
-   commit it cleanly, no push.
-4. Run or verify:
-
-```sh
-GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off /Users/tmc/.local/homebrew/bin/go test ./internal/tinkerhttp -run TestGetTrainingRunByTinkerPath -count=1
-GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off /Users/tmc/.local/homebrew/bin/go test ./cmd/localtinker -run 'TestPythonSDKScript/sdk_smoke' -count=1
-```
-
-5. Resync NotebookLM and repeat.
+The dirty diff was preserved at
+`/tmp/localtinker-wt-betadocs-dirty-20260511T051213Z.patch`. The worktree was
+not removed because deleting it would discard uncommitted worker-owned edits.
