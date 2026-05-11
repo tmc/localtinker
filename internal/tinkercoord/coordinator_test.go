@@ -50,6 +50,7 @@ func TestCapabilitiesAdvertiseSamplerConformance(t *testing.T) {
 	supported := caps.Models[0].Supported
 	for _, feature := range []string{
 		"sample",
+		"importance_sampling",
 		"sample_generated_logprobs",
 		"sample_prompt_logprobs",
 		"sample_string_stops",

@@ -552,8 +552,13 @@ func firstInput(a, b tinkertrain.ForwardBackwardInput) tinkertrain.ForwardBackwa
 }
 
 func normalizeAndValidateInput(input *tinkertrain.ForwardBackwardInput) error {
-	if input.LossFn != "cross_entropy" {
+	switch input.LossFn {
+	case "cross_entropy", "importance_sampling", "ppo", "cispo":
+	default:
 		return fmt.Errorf("unsupported loss function %q", input.LossFn)
+	}
+	if err := validateLossFnConfig(input.LossFn, input.LossFnConfig); err != nil {
+		return err
 	}
 	if len(input.Data) == 0 {
 		return errors.New("no data")
@@ -564,10 +569,8 @@ func normalizeAndValidateInput(input *tinkertrain.ForwardBackwardInput) error {
 			return fmt.Errorf("datum %d missing loss_fn_inputs", i)
 		}
 		for name := range datum.LossFnInputs {
-			switch name {
-			case "target_tokens", "weights":
-			default:
-				return fmt.Errorf("datum %d unsupported loss_fn_inputs key %q for cross_entropy", i, name)
+			if !lossInputKeyAllowed(input.LossFn, name) {
+				return fmt.Errorf("datum %d unsupported loss_fn_inputs key %q for %s", i, name, input.LossFn)
 			}
 		}
 		for name, tensor := range datum.LossFnInputs {
@@ -578,8 +581,55 @@ func normalizeAndValidateInput(input *tinkertrain.ForwardBackwardInput) error {
 			}
 			datum.LossFnInputs[name] = tensor
 		}
-		if err := validateCrossEntropyDatum(i, *datum); err != nil {
+		if err := validateLossDatum(input.LossFn, i, *datum); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func lossInputKeyAllowed(lossFn, name string) bool {
+	switch lossFn {
+	case "cross_entropy":
+		return name == "target_tokens" || name == "weights"
+	case "importance_sampling", "ppo", "cispo":
+		switch name {
+		case "target_tokens", "weights", "logprobs", "advantages":
+			return true
+		}
+	}
+	return false
+}
+
+func validateLossFnConfig(lossFn string, config map[string]float64) error {
+	if len(config) == 0 {
+		return nil
+	}
+	switch lossFn {
+	case "cross_entropy":
+		return nil
+	case "ppo", "cispo":
+		for name, v := range config {
+			switch name {
+			case "clip_low_threshold", "clip_high_threshold":
+				if math.IsNaN(v) || math.IsInf(v, 0) {
+					return fmt.Errorf("loss_fn_config[%q] = %v is not finite", name, v)
+				}
+				if v <= 0 {
+					return fmt.Errorf("loss_fn_config[%q] = %v is not positive", name, v)
+				}
+			default:
+				return fmt.Errorf("unsupported loss_fn_config key %q for %s", name, lossFn)
+			}
+		}
+		low, hasLow := config["clip_low_threshold"]
+		high, hasHigh := config["clip_high_threshold"]
+		if hasLow && hasHigh && low > high {
+			return fmt.Errorf("clip_low_threshold %v exceeds clip_high_threshold %v", low, high)
+		}
+	default:
+		for name := range config {
+			return fmt.Errorf("unsupported loss_fn_config key %q for %s", name, lossFn)
 		}
 	}
 	return nil
@@ -625,12 +675,15 @@ func normalizeTensorData(name string, tensor tinkertrain.TensorData) (tinkertrai
 			}
 		}
 		tensor.DType = "int64"
-	case "weights":
+	case "weights", "logprobs", "advantages":
 		if tensor.DType != "" && tensor.DType != "float32" {
 			return tensor, fmt.Errorf("dtype %q, want float32", tensor.DType)
 		}
 		for i, v := range tensor.Data {
-			if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				return tensor, fmt.Errorf("data[%d] = %v is not finite", i, v)
+			}
+			if name == "weights" && v < 0 {
 				return tensor, fmt.Errorf("data[%d] = %v is not a non-negative finite number", i, v)
 			}
 		}
@@ -639,10 +692,44 @@ func normalizeTensorData(name string, tensor tinkertrain.TensorData) (tinkertrai
 	return tensor, nil
 }
 
+func validateLossDatum(lossFn string, i int, datum tinkertrain.Datum) error {
+	if err := validateTokenAlignedDatum(lossFn, i, datum); err != nil {
+		return err
+	}
+	if policyLoss(lossFn) {
+		target := datum.LossFnInputs["target_tokens"]
+		for _, name := range []string{"logprobs", "advantages"} {
+			tensor, ok := datum.LossFnInputs[name]
+			if !ok {
+				return fmt.Errorf("datum %d missing %s for %s", i, name, lossFn)
+			}
+			if len(tensor.Data) != len(target.Data) {
+				return fmt.Errorf("datum %d %s length %d does not match target_tokens length %d", i, name, len(tensor.Data), len(target.Data))
+			}
+			if !sameShape(tensor.Shape, target.Shape) {
+				return fmt.Errorf("datum %d %s shape %v does not match target_tokens shape %v", i, name, tensor.Shape, target.Shape)
+			}
+		}
+	}
+	return nil
+}
+
+func policyLoss(lossFn string) bool {
+	switch lossFn {
+	case "importance_sampling", "ppo", "cispo":
+		return true
+	}
+	return false
+}
+
 func validateCrossEntropyDatum(i int, datum tinkertrain.Datum) error {
+	return validateTokenAlignedDatum("cross_entropy", i, datum)
+}
+
+func validateTokenAlignedDatum(lossFn string, i int, datum tinkertrain.Datum) error {
 	target, ok := datum.LossFnInputs["target_tokens"]
 	if !ok {
-		return fmt.Errorf("datum %d missing target_tokens for cross_entropy", i)
+		return fmt.Errorf("datum %d missing target_tokens for %s", i, lossFn)
 	}
 	if weight, ok := datum.LossFnInputs["weights"]; ok && len(weight.Data) != len(target.Data) {
 		return fmt.Errorf("datum %d weights length %d does not match target_tokens length %d", i, len(weight.Data), len(target.Data))

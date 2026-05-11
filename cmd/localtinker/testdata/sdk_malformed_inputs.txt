@@ -11,11 +11,11 @@ from tinker import ServiceClient
 base_url = os.environ["TINKER_BASE_URL"]
 client = ServiceClient()
 try:
-    def expect_user_error(name, datum, want):
+    def expect_user_error(name, datum, want, loss_fn="cross_entropy"):
         req = {
             "model_id": "model-a",
             "forward_input": {
-                "loss_fn": "cross_entropy",
+                "loss_fn": loss_fn,
                 "data": [datum],
             },
         }
@@ -77,6 +77,56 @@ try:
         "shape": [2, 3],
     }
     expect_user_error("bad_shape", bad_shape, "shape [2 3] has 6 elements but data has 4")
+
+    importance_missing_logprobs = valid_datum()
+    importance_missing_logprobs["loss_fn_inputs"]["advantages"] = {
+        "data": [1.0, 1.0, 1.0, 1.0],
+        "dtype": "float32",
+    }
+    expect_user_error(
+        "importance_missing_logprobs",
+        importance_missing_logprobs,
+        "missing logprobs for importance_sampling",
+        "importance_sampling",
+    )
+
+    importance_bad_shape = valid_datum()
+    importance_bad_shape["loss_fn_inputs"]["target_tokens"]["shape"] = [2, 2]
+    importance_bad_shape["loss_fn_inputs"]["logprobs"] = {
+        "data": [-1.0, -1.0, -1.0, -1.0],
+        "dtype": "float32",
+        "shape": [2, 2],
+    }
+    importance_bad_shape["loss_fn_inputs"]["advantages"] = {
+        "data": [1.0, 1.0, 1.0, 1.0],
+        "dtype": "float32",
+        "shape": [4],
+    }
+    expect_user_error(
+        "importance_bad_shape",
+        importance_bad_shape,
+        "advantages shape [4] does not match target_tokens shape [2 2]",
+        "importance_sampling",
+    )
+
+    importance_sparse_advantages = valid_datum()
+    importance_sparse_advantages["loss_fn_inputs"]["logprobs"] = {
+        "data": [-1.0, -1.0, -1.0, -1.0],
+        "dtype": "float32",
+    }
+    importance_sparse_advantages["loss_fn_inputs"]["advantages"] = {
+        "data": [1.0],
+        "dtype": "float32",
+        "shape": [1, 4],
+        "sparse_crow_indices": [0, 1],
+        "sparse_col_indices": [0],
+    }
+    expect_user_error(
+        "importance_sparse_advantages",
+        importance_sparse_advantages,
+        'sparse tensors are not supported for "advantages"',
+        "importance_sampling",
+    )
 
     print("SDK_MALFORMED_INPUTS_OK")
 finally:

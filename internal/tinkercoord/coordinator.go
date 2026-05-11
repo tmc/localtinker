@@ -277,6 +277,7 @@ func (c *Coordinator) Capabilities(_ context.Context) ServerCapabilities {
 				"handshake",
 				"future",
 				"cross_entropy",
+				"importance_sampling",
 				"adamw",
 				"save_weights_for_sampler",
 				"sample",
