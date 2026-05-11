@@ -234,6 +234,28 @@ func (s *Server) EnqueueOperation(kind string, payloadJSON []byte, model *tinker
 	}
 	s.operations[id] = op
 	s.operationQueue = append(s.operationQueue, id)
+	metadata, err := json.Marshal(map[string]any{
+		"type":   kind,
+		"source": "tinkerrpc",
+	})
+	if err != nil {
+		delete(s.operations, id)
+		s.operationQueue = s.operationQueue[:len(s.operationQueue)-1]
+		return "", err
+	}
+	if err := s.coord.PutFuture(context.Background(), tinkerdb.Future{
+		ID:           id,
+		State:        tinkercoord.FutureQueued,
+		Metadata:     metadata,
+		CreatedAt:    op.createdAt,
+		Operation:    kind,
+		RequestBytes: int64(len(payloadJSON)),
+		MaxAttempts:  3,
+	}); err != nil {
+		delete(s.operations, id)
+		s.operationQueue = s.operationQueue[:len(s.operationQueue)-1]
+		return "", err
+	}
 	return id, nil
 }
 
@@ -615,25 +637,30 @@ func (s *Server) runOperationCommandLocked(nodeID string) (*tinkerv1.NodeCommand
 		if op == nil || op.state != operationQueued {
 			continue
 		}
+		future, ok, err := s.coord.ClaimFuture(context.Background(), nodeID, s.now().UTC(), s.leaseTimeout)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+		if !ok || future.ID != op.id {
+			if ok {
+				s.operationQueue = append(s.operationQueue, op.id)
+			}
+			continue
+		}
 		commandID, err := newID("cmd")
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
-		leaseID, err := newID("lease")
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-		now := s.now().UTC()
 		op.state = operationLeased
 		op.nodeID = nodeID
 		op.commandID = commandID
-		op.leaseID = leaseID
-		op.leasedAt = now
-		op.deadline = now.Add(s.leaseTimeout)
-		op.attempts++
+		op.leaseID = future.LeaseID
+		op.leasedAt = future.StartedAt
+		op.deadline = future.LeaseExpiresAt
+		op.attempts = future.Attempt
 		return &tinkerv1.NodeCommand{
 			CommandId:        commandID,
-			LeaseId:          leaseID,
+			LeaseId:          future.LeaseID,
 			OperationId:      op.id,
 			Kind:             op.kind,
 			SeqId:            s.nextSeqLocked(),
@@ -693,6 +720,7 @@ func (s *Server) expireOperationLeasesLocked() {
 		if op.deadline.IsZero() || op.deadline.After(now) {
 			continue
 		}
+		_, _, _ = s.coord.RequeueFutureLease(context.Background(), op.id, op.leaseID, "operation lease expired", now, now)
 		op.state = operationQueued
 		op.nodeID = ""
 		op.commandID = ""
@@ -806,6 +834,8 @@ func (s *Server) operationTerminalLocked(event *tinkerv1.NodeEvent) {
 		if op.lastError == "" {
 			op.lastError = "operation canceled"
 		}
+		errJSON, _ := json.Marshal(map[string]any{"code": "canceled", "message": op.lastError})
+		_, _, _ = s.coord.FinishFutureLease(context.Background(), op.id, op.leaseID, tinkercoord.FutureCanceled, nil, errJSON, op.completedAt)
 		return
 	}
 	if failed := event.GetFailed(); failed != nil {
@@ -814,11 +844,20 @@ func (s *Server) operationTerminalLocked(event *tinkerv1.NodeEvent) {
 			op.lastErrorCode = err.GetCode()
 			op.lastError = err.GetMessage()
 		}
+		errJSON, _ := json.Marshal(map[string]any{"code": op.lastErrorCode, "message": op.lastError})
+		_, _, _ = s.coord.FinishFutureLease(context.Background(), op.id, op.leaseID, tinkercoord.FutureSystemError, nil, errJSON, op.completedAt)
 		return
 	}
 	op.state = operationComplete
 	op.lastErrorCode = ""
 	op.lastError = ""
+	var result json.RawMessage
+	if completed := event.GetCompleted(); completed != nil && completed.GetResult() != nil {
+		if raw, err := protojson.Marshal(completed.GetResult()); err == nil {
+			result = raw
+		}
+	}
+	_, _, _ = s.coord.FinishFutureLease(context.Background(), op.id, op.leaseID, tinkercoord.FutureComplete, result, nil, op.completedAt)
 }
 
 func (s *Server) matchOperationLocked(event *tinkerv1.NodeEvent) *operationState {

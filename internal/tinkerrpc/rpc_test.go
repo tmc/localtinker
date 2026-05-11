@@ -40,6 +40,17 @@ func operationSnapshot(t *testing.T, snap Snapshot, id string) OperationSnapshot
 	return OperationSnapshot{}
 }
 
+func dashboardFutureByID(t *testing.T, snap tinkercoord.DashboardSnapshot, id string) tinkercoord.DashboardFuture {
+	t.Helper()
+	for _, future := range snap.Futures {
+		if future.ID == id {
+			return future
+		}
+	}
+	t.Fatalf("future %s not found in dashboard snapshot %+v", id, snap.Futures)
+	return tinkercoord.DashboardFuture{}
+}
+
 func TestRegisterNodeAndListNodes(t *testing.T) {
 	coord, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
@@ -460,6 +471,14 @@ func TestWatchAssignsRunOperationsAcrossHealthyNodes(t *testing.T) {
 	if firstSnap.State != operationLeased || firstSnap.NodeID != "node-a" {
 		t.Fatalf("first snapshot = %+v", firstSnap)
 	}
+	coordSnap, err := rpc.coord.DashboardSnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstFuture := dashboardFutureByID(t, coordSnap, first)
+	if firstFuture.State != tinkercoord.FutureRunning || firstFuture.AssignedNodeID != "node-a" || firstFuture.LeaseID == "" {
+		t.Fatalf("first future = %#v, want running on node-a", firstFuture)
+	}
 	secondSnap := operationSnapshot(t, snap, second)
 	if secondSnap.State != operationLeased || secondSnap.NodeID != "node-b" {
 		t.Fatalf("second snapshot = %+v", secondSnap)
@@ -540,6 +559,14 @@ func TestWatchRequeuesExpiredOperationLease(t *testing.T) {
 	got := operationSnapshot(t, snap, opID)
 	if got.Attempts != 2 || got.NodeID != "node-b" {
 		t.Fatalf("operation snapshot = %+v, want second attempt on node-b", got)
+	}
+	coordSnap, err := rpc.coord.DashboardSnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	future := dashboardFutureByID(t, coordSnap, opID)
+	if future.Attempt != 2 || future.AssignedNodeID != "node-b" || future.LeaseID != second.GetLeaseId() {
+		t.Fatalf("future = %#v, want second durable lease on node-b", future)
 	}
 }
 
@@ -670,6 +697,14 @@ func TestReportTerminalOperationQueuesAck(t *testing.T) {
 	got := operationSnapshot(t, snap, opID)
 	if got.State != operationComplete || !got.AckPending {
 		t.Fatalf("operation snapshot = %+v, want complete with ack pending", got)
+	}
+	coordSnap, err := rpc.coord.DashboardSnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	future := dashboardFutureByID(t, coordSnap, opID)
+	if future.State != tinkercoord.FutureComplete {
+		t.Fatalf("future = %#v, want durable complete state", future)
 	}
 	ack, err := rpc.watchCommand("node-a")
 	if err != nil {

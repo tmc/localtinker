@@ -319,6 +319,22 @@ func (c *Coordinator) RecordNode(ctx context.Context, node tinkerdb.Node) error 
 	return c.store.PutNode(ctx, node)
 }
 
+func (c *Coordinator) PutFuture(ctx context.Context, future tinkerdb.Future) error {
+	return c.store.PutFuture(ctx, future)
+}
+
+func (c *Coordinator) ClaimFuture(ctx context.Context, nodeID string, now time.Time, leaseTimeout time.Duration) (tinkerdb.Future, bool, error) {
+	return c.store.ClaimNextFuture(ctx, nodeID, now, leaseTimeout)
+}
+
+func (c *Coordinator) FinishFutureLease(ctx context.Context, id, leaseID, state string, result, errPayload json.RawMessage, now time.Time) (tinkerdb.Future, bool, error) {
+	return c.store.FinishFuture(ctx, id, leaseID, state, result, errPayload, now)
+}
+
+func (c *Coordinator) RequeueFutureLease(ctx context.Context, id, leaseID, reason string, nextRunAt, now time.Time) (tinkerdb.Future, bool, error) {
+	return c.store.RequeueFuture(ctx, id, leaseID, reason, nextRunAt, now)
+}
+
 func (c *Coordinator) ClientConfig(_ context.Context) ClientConfig {
 	return ClientConfig{
 		UseJWT:               false,
