@@ -41,9 +41,9 @@ jq -c . hosted comparison fixtures >/dev/null
 | --- | --- | --- |
 | Queue/backpressure | `hosted comparison fixture` or successor artifact | `TINKER_API_KEY` |
 | Checkpoint archive cross-owner denial | `hosted comparison fixture` or successor artifact | `TINKER_API_KEY`, second principal |
-| Same-model sampler distribution comparison | `hosted comparison fixture` plus local successor artifact | `TINKER_API_KEY` for hosted, local MLX model cache for paired local |
+| Sampler distribution regression check | `hosted comparison fixture` plus `hosted comparison fixture` | Reprobe only when sampler semantics or model mapping changes |
 | Optimizer numeric equivalence | `hosted comparison fixture` plus local successor artifact | `TINKER_API_KEY` for hosted, local MLX model cache for paired local |
-| Policy-loss capability decision | `hosted comparison fixture` | No more hosted input; decide whether local should keep advertising policy losses that hosted rejects for the recorded fixture |
+| Policy-loss capability regression check | `hosted comparison fixture` | Reprobe only if hosted starts accepting the recorded SDK-shaped TensorData fixture; local currently keeps policy-loss execution available but does not advertise it as hosted-compatible |
 
 ## Artifact Rules
 

@@ -23,7 +23,9 @@ var (
 type Capabilities struct {
 	Training bool
 	Sampling bool
-	Losses   []string
+	// Losses lists hosted-compatible built-in losses advertised by the local
+	// client. Experimental local-only losses may still validate and execute.
+	Losses []string
 }
 
 // ModelRegistry resolves Tinker model names to local model assets.

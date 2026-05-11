@@ -68,6 +68,22 @@ func TestHandshakeRoutes(t *testing.T) {
 	if !ok || len(supported) == 0 {
 		t.Fatalf("supported capabilities = %#v, want non-empty list", caps.SupportedModels[0]["supported"])
 	}
+	supportedSet := map[string]bool{}
+	for _, v := range supported {
+		s, ok := v.(string)
+		if !ok {
+			t.Fatalf("supported capability %T = %[1]v, want string", v)
+		}
+		supportedSet[s] = true
+	}
+	if !supportedSet["cross_entropy"] {
+		t.Fatalf("supported capabilities = %v, missing cross_entropy", supported)
+	}
+	for _, name := range []string{"importance_sampling", "ppo", "cispo", "dro"} {
+		if supportedSet[name] {
+			t.Fatalf("supported capabilities = %v, unexpectedly advertised %q", supported, name)
+		}
+	}
 }
 
 func TestSessionRESTRoutes(t *testing.T) {
