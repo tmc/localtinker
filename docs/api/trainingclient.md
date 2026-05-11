@@ -15,10 +15,12 @@ training = client.create_lora_training_client(
 
 `forward(data, loss_fn)` computes local loss without applying gradients.
 
-localtinker supports dense cross entropy and policy-loss inputs through the
-upstream SDK data types. Built-in policy losses are `importance_sampling`,
-`ppo`, `cispo`, and `dro`; DRO requires an explicit `loss_fn_config["beta"]`.
-Unsupported tensor forms return local user errors.
+localtinker advertises dense cross entropy as the hosted-compatible built-in
+loss. Policy-loss inputs (`importance_sampling`, `ppo`, `cispo`, and `dro`)
+are accepted by the local executor for parity experiments, but are not
+advertised in server capabilities because the recorded hosted fixture rejects
+the same SDK-shaped TensorData inputs before metrics. DRO requires an explicit
+`loss_fn_config["beta"]`. Unsupported tensor forms return local user errors.
 
 ## Forward And Backward
 

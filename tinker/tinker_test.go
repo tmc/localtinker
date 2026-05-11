@@ -318,7 +318,7 @@ func TestCreateLoRAAndClose(t *testing.T) {
 	}
 }
 
-func TestCapabilitiesReportExecutableLosses(t *testing.T) {
+func TestCapabilitiesReportHostedCompatibleLosses(t *testing.T) {
 	ctx := context.Background()
 	client, err := New(Config{
 		RootDir: t.TempDir(),
@@ -335,7 +335,7 @@ func TestCapabilitiesReportExecutableLosses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"cross_entropy", "importance_sampling", "ppo", "cispo", "dro"}
+	want := []string{"cross_entropy"}
 	if len(caps.Losses) != len(want) {
 		t.Fatalf("Losses = %v, want %v", caps.Losses, want)
 	}

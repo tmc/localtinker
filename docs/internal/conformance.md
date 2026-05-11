@@ -168,7 +168,7 @@ limited public beta only if the caveats below are stated plainly.
 | Futures and queueing | Local queue, cancellation, panic containment, unfinished-queue recovery, and local queue backpressure timing are covered. `docs/internal/hosted-comparison/20260511-0480f94-cancel-future-local.jsonl` records the local cancel route and SDK retrieve-only surface. `docs/internal/hosted-comparison/20260511-55ffaf5-cancel-future-hosted.jsonl` records hosted raw `/api/v1/cancel_future` returning 404. `docs/internal/hosted-comparison/20260511-0480f94-queue-backpressure-local.jsonl` records the local one-slot queue case. | Disclose until hosted queue timing can be probed. |
 | Cross-entropy | Dense tensors, CSR `target_tokens`/`weights` rehydration, unsupported sparse tensor rejection, invalid weights, and logprobs are covered locally. `docs/internal/hosted-comparison/20260505-497eb1c-ce-hosted-local.jsonl` records matching hosted/local per-token logprob shapes and a forward loss mean difference. `docs/internal/hosted-comparison/20260511-55ffaf5-fractional-weights-hosted.jsonl` records hosted arbitrary fractional dense weights succeeding with `loss:sum` and per-token outputs. | Beta-ready with numeric and metric-name caveats. |
 | Custom losses | `docs/internal/hosted-comparison/20260505-ecc480f-custom-loss-hosted-local.jsonl` records hosted and local `forward_backward_custom` success and `custom_loss:mean` metric shape evidence. | Beta-ready with numeric caveats. |
-| Sampling | Generated logprobs, prompt logprobs, deterministic seed flow, string stops, and top-k prompt logprob shapes are covered locally and in hosted comparison rows. `docs/internal/hosted-comparison/20260511-55ffaf5-sampler-distribution-hosted.jsonl` records live hosted seeded samples for fixed token prompts. | Beta-ready with numeric/distribution caveats. |
+| Sampling | Generated logprobs, prompt logprobs, deterministic seed flow, string stops, and top-k prompt logprob shapes are covered locally and in hosted comparison rows. `docs/internal/hosted-comparison/20260511-55ffaf5-sampler-distribution-hosted.jsonl` records live hosted seeded samples for fixed token prompts; `docs/internal/hosted-comparison/20260511-b1f9f9c-sampler-distribution-local.jsonl` records the paired local Qwen/Qwen3-8B run and matching sequence/logprob shapes. | Beta-ready with numeric/distribution caveats. |
 | Packaging | Clean-checkout `MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./...`; latest recorded pass: `65f4c6e`. | Beta-ready; rerun before any release commit. |
 | Secrets and artifacts | Hosted comparison JSONL artifacts use scrubbed runner metadata (`python`, `local-runner`). No keys, binaries, downloaded weights, generated caches, or private model paths should be staged. | Beta-ready; keep scanning before release. |
 
@@ -221,9 +221,12 @@ probe is on record. Evidence reviewed 2026-05-11.
   local source `metrics.loss:mean`).
 - Policy losses `importance_sampling`, `ppo`, `cispo`, and `dro` execute
   locally with the public Tinker loss formulas and return per-token
-  `logprobs`; policy loss metrics use `loss:sum`. PPO and CISPO default to
-  clip thresholds `0.8` and `1.2`; DRO requires an explicit
-  `loss_fn_config["beta"]` because no hosted default is documented. Pinned by
+  `logprobs`; policy loss metrics use `loss:sum`. They are intentionally not
+  advertised in `get_server_capabilities` or `tinker.Client.Capabilities`
+  because hosted rejects the recorded SDK-shaped fixture before metrics. PPO
+  and CISPO default to clip thresholds `0.8` and `1.2`; DRO requires an
+  explicit `loss_fn_config["beta"]` because no hosted default is documented.
+  Pinned by
   `internal/tinkertrain.TestDensePolicyLossesReturnWeightedSumAndLogprobs`.
   `docs/internal/hosted-comparison/20260511-0480f94-policy-losses-hosted-local.jsonl`
   records local `forward` and `forward_backward` rows for all four policy
@@ -232,7 +235,8 @@ probe is on record. Evidence reviewed 2026-05-11.
   shows the same SDK-shaped TensorData fixture failing for all four policy
   losses with `RequestFailedError`, category `unknown`, and message signature
   `could_not_convert_loss_function_inputs_to_array_record`. Local policy-loss
-  execution is therefore broader than the hosted behavior recorded here.
+  execution remains available for experiments, but the advertised hosted-
+  compatible loss list is limited to `cross_entropy`.
 - CSR sparse `target_tokens` and `weights` are accepted and rehydrated to
   dense tensors in both the direct Go API and HTTP path. Pinned by
   `internal/tinkertrain.TestDatumTargetsRehydratesSparse`,
@@ -310,4 +314,9 @@ probe is on record. Evidence reviewed 2026-05-11.
   (`20260505-a995c00` rows 13 and 26). Hosted seeded sample rows for the
   current SDK are recorded in
   `docs/internal/hosted-comparison/20260511-55ffaf5-sampler-distribution-hosted.jsonl`;
-  a paired same-model local distribution comparison is still not recorded.
+  the paired local Qwen/Qwen3-8B run is recorded in
+  `docs/internal/hosted-comparison/20260511-b1f9f9c-sampler-distribution-local.jsonl`.
+  The paired artifacts match sequence counts, generated-token counts,
+  generated-logprob counts, prompt-logprob counts, and top-k prompt-logprob
+  presence for the fixed prompt/seed cases; generated token IDs remain
+  distribution evidence, not an equality assertion.

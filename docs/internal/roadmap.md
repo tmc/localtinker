@@ -198,7 +198,9 @@ Goal: keep local behavior honest against hosted Tinker.
   locally and are covered by local JSONL rows. Live hosted evidence in
   `docs/internal/hosted-comparison/20260511-55ffaf5-policy-losses-hosted.jsonl`
   shows the same SDK-shaped TensorData fixture fails before metrics with
-  `could_not_convert_loss_function_inputs_to_array_record`.
+  `could_not_convert_loss_function_inputs_to_array_record`; local therefore
+  keeps policy-loss execution available but no longer advertises those losses
+  as hosted-compatible capabilities.
 - Arbitrary non-prefix fractional dense weights execute locally and on hosted.
   `docs/internal/hosted-comparison/20260511-55ffaf5-fractional-weights-hosted.jsonl`
   records hosted success for `[0.25, 1, 0, 0.75]`; hosted reports `loss:sum`,
@@ -210,23 +212,22 @@ Goal: keep local behavior honest against hosted Tinker.
   but cross-owner authorization evidence still requires a second principal
   token.
 - Hosted numerics and local MLX numerics will differ. Hosted sampler rows and
-  hosted optimizer metrics/resume shape are now recorded at `55ffaf5`, but
-  same-model local sampler distribution and exact optimizer numeric
-  equivalence remain comparison gaps, not local implementation gaps.
+  hosted optimizer metrics/resume shape are now recorded at `55ffaf5`.
+  `docs/internal/hosted-comparison/20260511-b1f9f9c-sampler-distribution-local.jsonl`
+  records the paired local Qwen/Qwen3-8B sampler run; exact optimizer numeric
+  equivalence remains a comparison gap, not a local implementation gap.
 
 ## Next Milestones
 
-1. Compare hosted/local sampler distributions across fixed prompts, seeds,
-   temperature, top-p, and top-k.
-2. Compare hosted/local optimizer metrics and resume behavior after
+1. Compare hosted/local optimizer metrics and resume behavior after
    `optim_step`.
-3. Probe hosted private cross-owner archive denial with a second hosted
+2. Probe hosted private cross-owner archive denial with a second hosted
    principal.
-4. Decide whether local policy-loss capability advertising should remain
-   broader than the hosted behavior recorded at `55ffaf5`.
-5. MLX library setup (`MLX_LIB_PATH`) for clean checkouts is documented in
+3. Revisit policy-loss capability advertising only if hosted starts accepting
+   the recorded SDK-shaped TensorData fixture.
+4. MLX library setup (`MLX_LIB_PATH`) for clean checkouts is documented in
    `docs/mlx-setup.md` and referenced from the README.
-6. Deterministic sampler tests over a small cached model: covered by
+5. Deterministic sampler tests over a small cached model: covered by
    `TestSampleDeterministicSmallCachedModel`,
    `TestSampleDeterministicRepeats`, and `TestSampleDeterministicPrefix`
    in `internal/tinkertrain/sample_test.go`. They skip cleanly when

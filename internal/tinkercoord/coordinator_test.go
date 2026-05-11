@@ -49,8 +49,8 @@ func TestCapabilitiesAdvertiseSamplerConformance(t *testing.T) {
 	}
 	supported := caps.Models[0].Supported
 	for _, feature := range []string{
+		"cross_entropy",
 		"sample",
-		"importance_sampling",
 		"sample_generated_logprobs",
 		"sample_prompt_logprobs",
 		"sample_string_stops",
@@ -58,6 +58,11 @@ func TestCapabilitiesAdvertiseSamplerConformance(t *testing.T) {
 	} {
 		if !slices.Contains(supported, feature) {
 			t.Fatalf("supported = %v, missing %q", supported, feature)
+		}
+	}
+	for _, feature := range []string{"importance_sampling", "ppo", "cispo", "dro"} {
+		if slices.Contains(supported, feature) {
+			t.Fatalf("supported = %v, unexpectedly advertised %q", supported, feature)
 		}
 	}
 }

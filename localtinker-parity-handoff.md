@@ -34,6 +34,8 @@ Closed locally:
   fractional stop token shapes are rejected at the parse boundary.
 - Policy loss execution. `cross_entropy`, `importance_sampling`, `ppo`,
   `cispo`, and `dro` execute locally; policy losses report `loss:sum`.
+  Only `cross_entropy` is advertised as hosted-compatible because hosted
+  rejects the recorded SDK-shaped policy-loss fixture before metrics.
 - Image asset extension point. `tinkertrain.ImageAssetResolver` is reachable
   through programmatic HTTP wiring.
 - Local queue, cancel, checkpoint archive metadata, and archive visibility
@@ -43,12 +45,7 @@ Open hosted/comparison gaps:
 
 - Hosted scheduler timing and operation backpressure.
 - Hosted private cross-owner archive denial, requiring a second principal.
-- Same-model local-vs-hosted sampler distribution comparison.
 - Exact local-vs-hosted optimizer numeric equivalence after `optim_step`.
-- Policy-loss capability semantics: local executes `importance_sampling`,
-  `ppo`, `cispo`, and `dro`, but hosted at `55ffaf5` rejects the same
-  SDK-shaped TensorData fixture before metrics with
-  `could_not_convert_loss_function_inputs_to_array_record`.
 
 ## Evidence Artifacts
 
@@ -63,6 +60,7 @@ Current in-repo artifacts:
 - `docs/internal/hosted-comparison/20260511-55ffaf5-policy-losses-hosted.jsonl`
 - `docs/internal/hosted-comparison/20260511-55ffaf5-fractional-weights-hosted.jsonl`
 - `docs/internal/hosted-comparison/20260511-55ffaf5-sampler-distribution-hosted.jsonl`
+- `docs/internal/hosted-comparison/20260511-b1f9f9c-sampler-distribution-local.jsonl`
 - `docs/internal/hosted-comparison/20260511-55ffaf5-optimizer-metrics-hosted.jsonl`
 - `docs/internal/hosted-comparison/20260511-55ffaf5-archive-auth-signed-url-hosted.jsonl`
 - `docs/internal/hosted-comparison/20260511-55ffaf5-cancel-future-hosted.jsonl`
@@ -95,8 +93,8 @@ for this parity slice unless the user explicitly asks for a full smoke run.
 
 Refresh NotebookLM from current `main` after committing this evidence, then ask
 for a strict gap audit. Remaining hosted work needs either a second principal
-for cross-owner archive denial or a paired local run for same-model sampler and
-optimizer numeric comparisons.
+for cross-owner archive denial or a paired local run for optimizer numeric
+comparison.
 
 Do not print secret values. Keep commits local unless the user explicitly asks
 to push.
