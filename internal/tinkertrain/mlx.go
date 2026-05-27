@@ -125,6 +125,9 @@ func loadModelTokenizer(path string) mlxlm.Tokenizer {
 func resolveMLXBase(base string) string {
 	switch base {
 	case "Qwen/Qwen3-8B":
+		if override := os.Getenv("LOCALTINKER_QWEN3_8B_MLX_BASE"); override != "" {
+			return override
+		}
 		return "mlx-community/Qwen3-8B-4bit"
 	default:
 		return base
