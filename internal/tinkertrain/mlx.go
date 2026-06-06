@@ -947,23 +947,25 @@ func (m *mlxModel) trainDenseStep(ctx context.Context, batch denseBatch, params 
 			return nil, fmt.Errorf("unsupported loss function %q", batch.lossFn)
 		}
 	}
-	trainParams := training.DefaultTrainParameters()
-	trainParams.Optimizer = "adamw"
-	trainParams.TrainingMode = "separate"
-	trainParams.LearningRate = float32(lr)
-	trainParams.WeightDecay = float32(params.WeightDecay)
-	trainParams.MaxGradNorm = float32(params.GradClipNorm)
-
 	nextra := 3
 	extraInputs := []*mlx.Array{inputs, targets, weights}
 	if policyLoss(batch.lossFn) {
 		nextra = 5
 		extraInputs = append(extraInputs, oldLogprobs, advantages)
 	}
-	step, err := training.NewTrainingStep(len(trainable), nextra, lossFn, trainParams)
-	if err != nil {
-		return 0, err
-	}
+
+	// Build the AdamW step directly from the SDK-supplied hyperparameters. The
+	// dependency's NewTrainingStep factory hardcodes betas/eps and drops weight
+	// decay on the "separate" path, which would silently diverge from the SDK
+	// defaults (beta2=0.95, eps=1e-12), so call NewCompiledAdamW with the request
+	// values instead.
+	adam := params.withDefaults()
+	step := training.NewCompiledAdamW(
+		len(trainable), nextra,
+		float32(adam.Beta1), float32(adam.Beta2), float32(adam.Eps),
+		float32(adam.WeightDecay), float32(adam.GradClipNorm),
+		lossFn,
+	)
 	defer step.Free()
 	step.InitState(trainable)
 

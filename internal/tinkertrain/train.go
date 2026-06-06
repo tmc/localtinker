@@ -15,8 +15,29 @@ var ErrNotFound = errors.New("model not found")
 type Manager struct {
 	mu          sync.Mutex
 	models      map[string]trainModel
-	samplers    map[string]string
+	samplers    map[string]samplerSession
 	imageAssets ImageAssetResolver
+}
+
+// samplerSession records the resolved model and the SDK-facing metadata for a
+// created sampling session so REST sampler lookups can echo the real base model
+// and checkpoint path instead of a hardcoded default.
+type samplerSession struct {
+	modelID   string
+	baseModel string
+	modelPath string
+}
+
+// SamplerInfo returns the base model and checkpoint path for a created sampling
+// session. modelPath is empty for base-model sessions with no checkpoint.
+func (m *Manager) SamplerInfo(sessionID string) (baseModel, modelPath string, ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.samplers[sessionID]
+	if !ok {
+		return "", "", false
+	}
+	return s.baseModel, s.modelPath, true
 }
 
 type CreateConfig struct {
@@ -82,6 +103,25 @@ type AdamParams struct {
 	GradClipNorm float64 `json:"grad_clip_norm"`
 }
 
+// withDefaults fills unset learning_rate/beta1/beta2/eps with the SDK AdamParams
+// defaults (1e-4, 0.9, 0.95, 1e-12). WeightDecay and GradClipNorm default to 0
+// in the SDK, so a zero value there is meaningful and left as-is.
+func (p AdamParams) withDefaults() AdamParams {
+	if p.LearningRate == 0 {
+		p.LearningRate = 1e-4
+	}
+	if p.Beta1 == 0 {
+		p.Beta1 = 0.9
+	}
+	if p.Beta2 == 0 {
+		p.Beta2 = 0.95
+	}
+	if p.Eps == 0 {
+		p.Eps = 1e-12
+	}
+	return p
+}
+
 type OptimStepOutput struct {
 	Metrics map[string]float64 `json:"metrics,omitempty"`
 }
@@ -133,7 +173,7 @@ type trainModel interface {
 func NewManager() *Manager {
 	return &Manager{
 		models:   make(map[string]trainModel),
-		samplers: make(map[string]string),
+		samplers: make(map[string]samplerSession),
 	}
 }
 
@@ -151,7 +191,7 @@ func (m *Manager) Create(ctx context.Context, modelID string, cfg CreateConfig) 
 		m.models = make(map[string]trainModel)
 	}
 	if m.samplers == nil {
-		m.samplers = make(map[string]string)
+		m.samplers = make(map[string]samplerSession)
 	}
 	m.models[modelID] = model
 	return nil
@@ -161,8 +201,8 @@ func (m *Manager) Delete(_ context.Context, modelID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.models, modelID)
-	for sessionID, id := range m.samplers {
-		if id == modelID {
+	for sessionID, s := range m.samplers {
+		if s.modelID == modelID {
 			delete(m.samplers, sessionID)
 		}
 	}
@@ -231,25 +271,36 @@ func (m *Manager) CreateSamplingSession(ctx context.Context, sessionID, modelPat
 			return err
 		}
 	}
+	// When the session is created from a checkpoint path with no explicit
+	// base_model, the SDK-facing base model is unknown; the local runtime only
+	// maps Qwen3-8B, so that is the faithful default.
+	echoedBase := baseModel
+	if echoedBase == "" {
+		echoedBase = "Qwen/Qwen3-8B"
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.samplers == nil {
-		m.samplers = make(map[string]string)
+		m.samplers = make(map[string]samplerSession)
 	}
-	m.samplers[sessionID] = modelID
+	m.samplers[sessionID] = samplerSession{
+		modelID:   modelID,
+		baseModel: echoedBase,
+		modelPath: modelPath,
+	}
 	return nil
 }
 
 func (m *Manager) Sample(ctx context.Context, req SampleRequest) (SampleOutput, error) {
 	modelID := modelIDFromPath(req.ModelPath)
 	if modelID == "" && req.SamplingSessionID != "" {
-		var ok bool
 		m.mu.Lock()
-		modelID, ok = m.samplers[req.SamplingSessionID]
+		s, ok := m.samplers[req.SamplingSessionID]
 		m.mu.Unlock()
 		if !ok {
 			return SampleOutput{}, fmt.Errorf("unknown sampling session")
 		}
+		modelID = s.modelID
 	}
 	if modelID == "" && req.BaseModel != "" {
 		modelID = req.BaseModel

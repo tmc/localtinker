@@ -161,6 +161,36 @@ func TestManagerLoadStateWithOptimizer(t *testing.T) {
 	}
 }
 
+func TestSamplerInfo(t *testing.T) {
+	m := &Manager{models: map[string]trainModel{
+		"Qwen/Qwen3-8B": &fakeTrainModel{},
+		"model-a":       &fakeTrainModel{},
+	}}
+	ctx := context.Background()
+
+	// Base-model session echoes the requested base model and a nil path.
+	if err := m.CreateSamplingSession(ctx, "s1", "", "Qwen/Qwen3-8B"); err != nil {
+		t.Fatal(err)
+	}
+	base, path, ok := m.SamplerInfo("s1")
+	if !ok || base != "Qwen/Qwen3-8B" || path != "" {
+		t.Fatalf("SamplerInfo(s1) = %q, %q, %v", base, path, ok)
+	}
+
+	// Checkpoint-path session records the path and falls back to the default base.
+	if err := m.CreateSamplingSession(ctx, "s2", "tinker://model-a/weights/ckpt", ""); err != nil {
+		t.Fatal(err)
+	}
+	base, path, ok = m.SamplerInfo("s2")
+	if !ok || base != "Qwen/Qwen3-8B" || path != "tinker://model-a/weights/ckpt" {
+		t.Fatalf("SamplerInfo(s2) = %q, %q, %v", base, path, ok)
+	}
+
+	if _, _, ok := m.SamplerInfo("unknown"); ok {
+		t.Fatal("SamplerInfo(unknown) reported ok")
+	}
+}
+
 func TestCheckpointMetadataJSON(t *testing.T) {
 	meta := checkpointMetadata{
 		Format:       "localtinker.checkpoint",

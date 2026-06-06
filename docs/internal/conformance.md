@@ -155,6 +155,47 @@ Python executable, `TINKER_BASE_URL` class (`hosted` or `local`, not the secret
 URL), and checkpoint root. Do not record API keys, signed archive URLs, local
 home directories, or downloaded model paths.
 
+## Parity Fixes (2026-06-06 SDK audit)
+
+A multi-agent audit mapped the upstream SDK HTTP contract
+(`src/tinker/lib/public_interfaces/*`) against the local routes, then verified
+each candidate against the actual code on both sides: 25 candidates
+investigated, 6 confirmed, 19 cleared as non-gaps. The four confirmed major
+gaps are fixed and pinned:
+
+- `load_weights` read the wrong field. The SDK posts both `load_state` and
+  `load_state_with_optimizer` to `/api/v1/load_weights` distinguished by the
+  body key `optimizer` (`load_weights_request.py:18`); the handler decoded only
+  `optimizer_state`, so `optimizer:true` was silently dropped and optimizer
+  state was never restored. The handler now reads `optimizer` (with
+  `optimizer_state` kept as a fallback alias) via `loadWeightsRequest`. Pinned
+  by `internal/tinkerhttp.TestLoadWeightsOptimizerFlag`.
+- `ttl_seconds` on `save_weights`/`save_weights_for_sampler`
+  (`save_weights_request.py:20`) was not decoded, so a save-time TTL was lost.
+  The save handlers now decode `ttl_seconds`, share `ttlSecondsToDuration` with
+  the dedicated `/ttl` route, and thread it into `SetCheckpointTTL`. Pinned by
+  `internal/tinkerhttp.TestSaveTTL` and
+  `TestSaveWeightsRejectsNegativeTTL`.
+- `GET /api/v1/samplers/{id}` returned a hardcoded `Qwen/Qwen3-8B` base model
+  and ignored the session id, producing the wrong tokenizer for non-default
+  base models. It now resolves the recorded session via
+  `Coordinator.SamplerInfo` / `Manager.SamplerInfo` and returns 404 for unknown
+  ids. Pinned by `internal/tinkertrain.TestSamplerInfo` and the updated
+  `internal/tinkerhttp.TestSamplerRESTRoute`.
+- `AdamParams.beta1/beta2/eps` were ignored. The training path used the
+  dependency's `TrainingMode="separate"` factory, which hardcodes
+  `beta2=0.999, eps=1e-8` and drops weight decay; the SDK defaults are
+  `beta2=0.95, eps=1e-12`. `trainDenseStep` now builds the AdamW step directly
+  with `training.NewCompiledAdamW`, applying SDK defaults via
+  `AdamParams.withDefaults`. Pinned by
+  `internal/tinkertrain.TestAdamParamsWithDefaults`.
+
+Two cosmetic items remain intentionally unaddressed (functionally inert for the
+local single-tenant runtime): the optional `weights_access_token` field on
+`load_weights` (no access-control subsystem exists) and server-side
+`tinker://` prefix validation on `create_sampling_session` (the SDK validates
+this client-side).
+
 ## Can We Publicize?
 
 Current answer: not yet for a broad public launch. It is close enough for a

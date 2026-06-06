@@ -183,20 +183,11 @@ func TestSamplerRESTRoute(t *testing.T) {
 	}
 	h := New(c).Handler()
 
-	var sampler struct {
-		SamplerID string  `json:"sampler_id"`
-		BaseModel string  `json:"base_model"`
-		ModelPath *string `json:"model_path"`
-	}
-	getJSON(t, h, "/api/v1/samplers/sess-a:sample:0", &sampler)
-	if sampler.SamplerID != "sess-a:sample:0" {
-		t.Fatalf("sampler_id = %q, want sess-a:sample:0", sampler.SamplerID)
-	}
-	if sampler.BaseModel != "Qwen/Qwen3-8B" {
-		t.Fatalf("base_model = %q, want Qwen/Qwen3-8B", sampler.BaseModel)
-	}
-	if sampler.ModelPath != nil {
-		t.Fatalf("model_path = %q, want nil", *sampler.ModelPath)
+	// An unknown sampler id is a 404, not a hardcoded model echo.
+	var unknown ErrorResponse
+	methodJSON(t, h, http.MethodGet, "/api/v1/samplers/sess-a:sample:0", nil, http.StatusNotFound, &unknown)
+	if unknown.Code != "not_found" {
+		t.Fatalf("unknown sampler response = %#v", unknown)
 	}
 
 	var missing ErrorResponse
@@ -1660,6 +1651,81 @@ func trainingLoss(t *testing.T, h http.Handler, path string, body any) float64 {
 	metrics, _ := out["metrics"].(map[string]any)
 	loss, _ := metrics["loss:mean"].(float64)
 	return loss
+}
+
+func TestSaveTTL(t *testing.T) {
+	secs := func(v float64) *float64 { return &v }
+	tests := []struct {
+		name    string
+		seconds *float64
+		want    time.Duration
+		wantErr bool
+	}{
+		{"absent", nil, 0, false},
+		{"zero", secs(0), 0, false},
+		{"positive", secs(90), 90 * time.Second, false},
+		{"fractional", secs(1.5), 1500 * time.Millisecond, false},
+		{"negative", secs(-1), 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := saveTTL(tt.seconds)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("saveTTL err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Fatalf("saveTTL = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSaveWeightsRejectsNegativeTTL(t *testing.T) {
+	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+
+	var errResp struct {
+		Error    string `json:"error"`
+		Category string `json:"category"`
+	}
+	postJSONStatus(t, h, "/api/v1/save_weights",
+		map[string]any{"model_id": "model-a", "ttl_seconds": -5},
+		http.StatusBadRequest,
+		&errResp,
+	)
+	if errResp.Category != "user" || errResp.Error != "ttl is negative" {
+		t.Fatalf("save_weights negative ttl response = %#v", errResp)
+	}
+}
+
+func TestLoadWeightsOptimizerFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		def  bool
+		want bool
+	}{
+		{"sdk optimizer true", `{"optimizer":true}`, false, true},
+		{"sdk optimizer false", `{"optimizer":false}`, true, false},
+		{"alias optimizer_state true", `{"optimizer_state":true}`, false, true},
+		{"sdk wins over alias", `{"optimizer":true,"optimizer_state":false}`, false, true},
+		{"absent uses default", `{}`, true, true},
+		{"absent uses default false", `{}`, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var req loadWeightsRequest
+			if err := json.Unmarshal([]byte(tt.body), &req); err != nil {
+				t.Fatal(err)
+			}
+			if got := req.optimizerFlag(tt.def); got != tt.want {
+				t.Fatalf("optimizerFlag(%v) = %v, want %v", tt.def, got, tt.want)
+			}
+		})
+	}
 }
 
 func retrieveOK(t *testing.T, h http.Handler, requestID string) map[string]any {

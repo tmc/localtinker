@@ -689,7 +689,7 @@ func (c *Coordinator) OptimStep(ctx context.Context, modelID string, params tink
 	})
 }
 
-func (c *Coordinator) SaveWeightsForSampler(ctx context.Context, modelID, path string, samplingSessionSeqID int) (Future, error) {
+func (c *Coordinator) SaveWeightsForSampler(ctx context.Context, modelID, path string, samplingSessionSeqID int, ttl time.Duration) (Future, error) {
 	name := path
 	if name == "" {
 		name = fmt.Sprintf("ephemeral-%d", samplingSessionSeqID)
@@ -697,6 +697,11 @@ func (c *Coordinator) SaveWeightsForSampler(ctx context.Context, modelID, path s
 	modelPath, err := c.train.SaveForSampler(ctx, modelID, name)
 	if err != nil {
 		return c.UserErrorFuture(ctx, err.Error())
+	}
+	if ttl > 0 {
+		if err := c.SetCheckpointTTL(ctx, modelPath, ttl); err != nil {
+			return c.UserErrorFuture(ctx, err.Error())
+		}
 	}
 	result := map[string]any{
 		"type": "save_weights_for_sampler",
@@ -717,13 +722,18 @@ func (c *Coordinator) SaveWeightsForSampler(ctx context.Context, modelID, path s
 	})
 }
 
-func (c *Coordinator) SaveWeights(ctx context.Context, modelID, path string) (Future, error) {
+func (c *Coordinator) SaveWeights(ctx context.Context, modelID, path string, ttl time.Duration) (Future, error) {
 	if path == "" {
 		path = "checkpoint"
 	}
 	modelPath, err := c.train.SaveState(ctx, modelID, path)
 	if err != nil {
 		return c.UserErrorFuture(ctx, err.Error())
+	}
+	if ttl > 0 {
+		if err := c.SetCheckpointTTL(ctx, modelPath, ttl); err != nil {
+			return c.UserErrorFuture(ctx, err.Error())
+		}
 	}
 	return c.CompleteFuture(ctx, map[string]any{
 		"type": "save_weights",
@@ -765,6 +775,12 @@ func (c *Coordinator) CreateSamplingSession(ctx context.Context, sessionID strin
 		return "", err
 	}
 	return id, nil
+}
+
+// SamplerInfo returns the base model and checkpoint path recorded for a created
+// sampling session. modelPath is empty for base-model sessions.
+func (c *Coordinator) SamplerInfo(samplerID string) (baseModel, modelPath string, ok bool) {
+	return c.train.SamplerInfo(samplerID)
 }
 
 func (c *Coordinator) Sample(ctx context.Context, req tinkertrain.SampleRequest) (Future, error) {

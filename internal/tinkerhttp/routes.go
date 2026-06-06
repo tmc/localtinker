@@ -365,8 +365,9 @@ func (s *Server) unloadModel(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) saveWeights(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ModelID string `json:"model_id"`
-		Path    string `json:"path"`
+		ModelID    string   `json:"model_id"`
+		Path       string   `json:"path"`
+		TTLSeconds *float64 `json:"ttl_seconds"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
@@ -376,7 +377,12 @@ func (s *Server) saveWeights(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "missing model_id")
 		return
 	}
-	future, err := s.coord.SaveWeights(r.Context(), req.ModelID, req.Path)
+	ttl, err := saveTTL(req.TTLSeconds)
+	if err != nil {
+		writeUserError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	future, err := s.coord.SaveWeights(r.Context(), req.ModelID, req.Path, ttl)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "system_error", err.Error())
 		return
@@ -397,12 +403,32 @@ func (s *Server) loadStateWithOptimizer(w http.ResponseWriter, r *http.Request) 
 	s.loadWeightsWithOptimizer(w, r, true)
 }
 
-func (s *Server) loadWeightsWithOptimizer(w http.ResponseWriter, r *http.Request, optimizer bool) {
-	var req struct {
-		ModelID        string `json:"model_id"`
-		Path           string `json:"path"`
-		OptimizerState *bool  `json:"optimizer_state"`
+// loadWeightsRequest is the body of POST /api/v1/load_weights. The SDK posts
+// both load_state and load_state_with_optimizer to that route, distinguished by
+// the optimizer flag (LoadWeightsRequest.optimizer). The optimizer_state alias
+// is accepted as a fallback for older internal callers.
+type loadWeightsRequest struct {
+	ModelID        string `json:"model_id"`
+	Path           string `json:"path"`
+	Optimizer      *bool  `json:"optimizer"`
+	OptimizerState *bool  `json:"optimizer_state"`
+}
+
+// optimizerFlag reports whether optimizer state should be restored, preferring
+// the SDK optimizer field over the optimizer_state alias and falling back to def
+// when neither is present.
+func (req loadWeightsRequest) optimizerFlag(def bool) bool {
+	if req.Optimizer != nil {
+		return *req.Optimizer
 	}
+	if req.OptimizerState != nil {
+		return *req.OptimizerState
+	}
+	return def
+}
+
+func (s *Server) loadWeightsWithOptimizer(w http.ResponseWriter, r *http.Request, optimizer bool) {
+	var req loadWeightsRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
@@ -411,9 +437,7 @@ func (s *Server) loadWeightsWithOptimizer(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "bad_request", "missing model_id or path")
 		return
 	}
-	if req.OptimizerState != nil {
-		optimizer = *req.OptimizerState
-	}
+	optimizer = req.optimizerFlag(optimizer)
 	future, err := s.coord.LoadWeightsWithOptimizer(r.Context(), req.ModelID, req.Path, optimizer)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "system_error", err.Error())
@@ -429,9 +453,10 @@ func (s *Server) loadWeightsWithOptimizer(w http.ResponseWriter, r *http.Request
 
 func (s *Server) saveWeightsForSampler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ModelID              string `json:"model_id"`
-		Path                 string `json:"path"`
-		SamplingSessionSeqID int    `json:"sampling_session_seq_id"`
+		ModelID              string   `json:"model_id"`
+		Path                 string   `json:"path"`
+		SamplingSessionSeqID int      `json:"sampling_session_seq_id"`
+		TTLSeconds           *float64 `json:"ttl_seconds"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
@@ -441,7 +466,12 @@ func (s *Server) saveWeightsForSampler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "missing model_id")
 		return
 	}
-	future, err := s.coord.SaveWeightsForSampler(r.Context(), req.ModelID, req.Path, req.SamplingSessionSeqID)
+	ttl, err := saveTTL(req.TTLSeconds)
+	if err != nil {
+		writeUserError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	future, err := s.coord.SaveWeightsForSampler(r.Context(), req.ModelID, req.Path, req.SamplingSessionSeqID, ttl)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "system_error", err.Error())
 		return
@@ -1090,10 +1120,19 @@ func (s *Server) samplerPath(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "unknown sampler")
 		return
 	}
+	baseModel, modelPath, ok := s.coord.SamplerInfo(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found", "unknown sampler")
+		return
+	}
+	var path any
+	if modelPath != "" {
+		path = modelPath
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"sampler_id": id,
-		"base_model": "Qwen/Qwen3-8B",
-		"model_path": nil,
+		"base_model": baseModel,
+		"model_path": path,
 	})
 }
 
@@ -1391,10 +1430,7 @@ func decodeTTL(r *http.Request) (time.Duration, error) {
 		seconds = req.ExpiresIn
 	}
 	if seconds != nil {
-		if *seconds < 0 {
-			return 0, errors.New("ttl is negative")
-		}
-		return time.Duration(*seconds * float64(time.Second)), nil
+		return ttlSecondsToDuration(*seconds)
 	}
 	if req.ExpiresAt != "" {
 		at, err := time.Parse(time.RFC3339, req.ExpiresAt)
@@ -1408,4 +1444,23 @@ func decodeTTL(r *http.Request) (time.Duration, error) {
 		return ttl, nil
 	}
 	return 0, nil
+}
+
+// ttlSecondsToDuration converts a checkpoint TTL in seconds to a Duration,
+// rejecting negative values. A nil seconds pointer maps to a zero TTL (no
+// expiration); callers should only pass a value when one was provided.
+func ttlSecondsToDuration(seconds float64) (time.Duration, error) {
+	if seconds < 0 {
+		return 0, errors.New("ttl is negative")
+	}
+	return time.Duration(seconds * float64(time.Second)), nil
+}
+
+// saveTTL reads an optional ttl_seconds from a save request, returning a zero
+// Duration when absent.
+func saveTTL(seconds *float64) (time.Duration, error) {
+	if seconds == nil {
+		return 0, nil
+	}
+	return ttlSecondsToDuration(*seconds)
 }
