@@ -196,6 +196,34 @@ local single-tenant runtime): the optional `weights_access_token` field on
 `tinker://` prefix validation on `create_sampling_session` (the SDK validates
 this client-side).
 
+## Parity Fixes (SDK window af041ee..b1e4ee3)
+
+A follow-up audit of the upstream `af041ee..b1e4ee3` SDK window confirmed one
+server-surface gap and cleared the rest:
+
+- `save_weights`/`save_weights_for_sampler` now honor the SDK's explicit
+  `overwrite` bool (`save_weights_request.py`, default false). With
+  `overwrite:false` a named save against an existing checkpoint fails as a
+  terminal in-band `FutureUserError` (`checkpoint already exists: <name>`),
+  surfaced as HTTP 200 + `{error, category:"user"}` through `retrieve_future`;
+  it is deliberately not an HTTP 409, since the SDK's `execute_with_retries`
+  treats 409 as retryable and the SDK has removed its old "treat 409 as
+  success" hack. With `overwrite:true` the existing checkpoint dir is removed
+  before the save so stale files cannot leak. Sampler ephemeral saves
+  (`path==""`) are exempt. `seq_id` is accepted and ignored for
+  forward-compatibility. Pinned by
+  `internal/tinkercoord.TestSaveWeightsDuplicateIsUserError`,
+  `TestSaveWeightsForSamplerDuplicateIsUserError`,
+  `TestSaveWeightsForSamplerEphemeralIgnoresOverwrite`,
+  `internal/tinkertrain.TestManagerCheckpointExistsAndRemove`,
+  `TestManagerCheckpointExistsCleansName`, and
+  `internal/tinkerhttp.TestSaveWeightsHonorsOverwrite`.
+
+Out of scope for this window: audit-log and `assign_session_project` (no
+local equivalent and intentionally not surfaced); sparse CSR rehydration was
+already implemented in the prior audit; the remaining SDK changes are
+client-only.
+
 ## Can We Publicize?
 
 Current answer: not yet for a broad public launch. It is close enough for a

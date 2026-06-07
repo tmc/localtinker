@@ -689,10 +689,19 @@ func (c *Coordinator) OptimStep(ctx context.Context, modelID string, params tink
 	})
 }
 
-func (c *Coordinator) SaveWeightsForSampler(ctx context.Context, modelID, path string, samplingSessionSeqID int, ttl time.Duration) (Future, error) {
+func (c *Coordinator) SaveWeightsForSampler(ctx context.Context, modelID, path string, samplingSessionSeqID int, ttl time.Duration, overwrite bool) (Future, error) {
 	name := path
 	if name == "" {
+		// Ephemeral saves synthesize a unique per-session name and are never a
+		// user-visible duplicate, so the overwrite check applies to named saves only.
 		name = fmt.Sprintf("ephemeral-%d", samplingSessionSeqID)
+	} else if c.train.SamplerCheckpointExists(modelID, name) {
+		if !overwrite {
+			return c.UserErrorFuture(ctx, fmt.Sprintf("checkpoint already exists: %s", name))
+		}
+		if err := c.train.RemoveSamplerCheckpoint(modelID, name); err != nil {
+			return c.UserErrorFuture(ctx, err.Error())
+		}
 	}
 	modelPath, err := c.train.SaveForSampler(ctx, modelID, name)
 	if err != nil {
@@ -722,9 +731,17 @@ func (c *Coordinator) SaveWeightsForSampler(ctx context.Context, modelID, path s
 	})
 }
 
-func (c *Coordinator) SaveWeights(ctx context.Context, modelID, path string, ttl time.Duration) (Future, error) {
+func (c *Coordinator) SaveWeights(ctx context.Context, modelID, path string, ttl time.Duration, overwrite bool) (Future, error) {
 	if path == "" {
 		path = "checkpoint"
+	}
+	if c.train.StateCheckpointExists(modelID, path) {
+		if !overwrite {
+			return c.UserErrorFuture(ctx, fmt.Sprintf("checkpoint already exists: %s", path))
+		}
+		if err := c.train.RemoveStateCheckpoint(modelID, path); err != nil {
+			return c.UserErrorFuture(ctx, err.Error())
+		}
 	}
 	modelPath, err := c.train.SaveState(ctx, modelID, path)
 	if err != nil {

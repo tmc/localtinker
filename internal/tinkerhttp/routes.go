@@ -368,6 +368,9 @@ func (s *Server) saveWeights(w http.ResponseWriter, r *http.Request) {
 		ModelID    string   `json:"model_id"`
 		Path       string   `json:"path"`
 		TTLSeconds *float64 `json:"ttl_seconds"`
+		Overwrite  bool     `json:"overwrite"`
+		// seq_id is accepted and ignored for forward-compatibility with the SDK.
+		SeqID *int `json:"seq_id"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
@@ -382,7 +385,7 @@ func (s *Server) saveWeights(w http.ResponseWriter, r *http.Request) {
 		writeUserError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	future, err := s.coord.SaveWeights(r.Context(), req.ModelID, req.Path, ttl)
+	future, err := s.coord.SaveWeights(r.Context(), req.ModelID, req.Path, ttl, req.Overwrite)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "system_error", err.Error())
 		return
@@ -457,6 +460,9 @@ func (s *Server) saveWeightsForSampler(w http.ResponseWriter, r *http.Request) {
 		Path                 string   `json:"path"`
 		SamplingSessionSeqID int      `json:"sampling_session_seq_id"`
 		TTLSeconds           *float64 `json:"ttl_seconds"`
+		Overwrite            bool     `json:"overwrite"`
+		// seq_id is accepted and ignored for forward-compatibility with the SDK.
+		SeqID *int `json:"seq_id"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
@@ -471,7 +477,7 @@ func (s *Server) saveWeightsForSampler(w http.ResponseWriter, r *http.Request) {
 		writeUserError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	future, err := s.coord.SaveWeightsForSampler(r.Context(), req.ModelID, req.Path, req.SamplingSessionSeqID, ttl)
+	future, err := s.coord.SaveWeightsForSampler(r.Context(), req.ModelID, req.Path, req.SamplingSessionSeqID, ttl, req.Overwrite)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "system_error", err.Error())
 		return

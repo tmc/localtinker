@@ -240,6 +240,30 @@ func (m *Manager) SaveState(ctx context.Context, modelID, name string) (string, 
 	return model.saveState(ctx, name)
 }
 
+// StateCheckpointExists reports whether a save_weights checkpoint with name
+// already exists for modelID, without writing anything.
+func (m *Manager) StateCheckpointExists(modelID, name string) bool {
+	return CheckpointPathExists(checkpointTinkerPath(modelID, kindState, name))
+}
+
+// SamplerCheckpointExists reports whether a save_weights_for_sampler checkpoint
+// with name already exists for modelID, without writing anything.
+func (m *Manager) SamplerCheckpointExists(modelID, name string) bool {
+	return CheckpointPathExists(checkpointTinkerPath(modelID, kindSampler, name))
+}
+
+// RemoveStateCheckpoint deletes the save_weights checkpoint named name for
+// modelID so an overwrite save does not leak stale files.
+func (m *Manager) RemoveStateCheckpoint(modelID, name string) error {
+	return DeleteCheckpoint(checkpointTinkerPath(modelID, kindState, name))
+}
+
+// RemoveSamplerCheckpoint deletes the save_weights_for_sampler checkpoint named
+// name for modelID so an overwrite save does not leak stale files.
+func (m *Manager) RemoveSamplerCheckpoint(modelID, name string) error {
+	return DeleteCheckpoint(checkpointTinkerPath(modelID, kindSampler, name))
+}
+
 func (m *Manager) LoadState(ctx context.Context, modelID, path string) error {
 	return m.LoadStateWithOptimizer(ctx, modelID, path, false)
 }

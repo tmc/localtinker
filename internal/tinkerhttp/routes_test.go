@@ -1653,6 +1653,61 @@ func trainingLoss(t *testing.T, h http.Handler, path string, body any) float64 {
 	return loss
 }
 
+func TestSaveWeightsHonorsOverwrite(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LOCALTINKER_CHECKPOINT_ROOT", root)
+	dir := filepath.Join(root, "model-a", "weights", "ckpt")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dir, "adapters.safetensors")
+	if err := os.WriteFile(stale, []byte("stale"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+
+	// overwrite defaults to false: a duplicate named save surfaces as a terminal
+	// category:"user" future through retrieve_future (not an HTTP 409).
+	var future FutureResponse
+	postJSON(t, h, "/api/v1/save_weights",
+		map[string]any{"model_id": "model-a", "path": "ckpt", "overwrite": false},
+		&future,
+	)
+	var failed map[string]string
+	postJSON(t, h, "/api/v1/retrieve_future",
+		RetrieveFutureRequest{RequestID: future.RequestID},
+		&failed,
+	)
+	if failed["category"] != "user" || !strings.Contains(failed["error"], "already exists") {
+		t.Fatalf("duplicate save = %#v, want user error mentioning already exists", failed)
+	}
+	if _, err := os.Stat(stale); err != nil {
+		t.Fatalf("rejected save removed the existing checkpoint: %v", err)
+	}
+
+	// overwrite=true threads through and replaces: the stale checkpoint is gone
+	// and the future no longer reports a duplicate.
+	postJSON(t, h, "/api/v1/save_weights",
+		map[string]any{"model_id": "model-a", "path": "ckpt", "overwrite": true},
+		&future,
+	)
+	postJSON(t, h, "/api/v1/retrieve_future",
+		RetrieveFutureRequest{RequestID: future.RequestID},
+		&failed,
+	)
+	if strings.Contains(failed["error"], "already exists") {
+		t.Fatalf("overwrite=true still reported a duplicate: %#v", failed)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("overwrite=true did not remove stale checkpoint: err=%v", err)
+	}
+}
+
 func TestSaveTTL(t *testing.T) {
 	secs := func(v float64) *float64 { return &v }
 	tests := []struct {

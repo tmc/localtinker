@@ -28,6 +28,13 @@ const checkpointCompleteFile = "complete"
 const checkpointMetadataFile = "checkpoint.json"
 const checkpointOptimizerFile = "optimizer_state.json"
 
+// Checkpoint kinds name the two checkpoint namespaces under a model: training
+// state saved by save_weights and sampler weights saved by save_weights_for_sampler.
+const (
+	kindState   = "weights"
+	kindSampler = "sampler_weights"
+)
+
 type checkpointMetadata struct {
 	Format       string `json:"format"`
 	Version      int    `json:"version"`
@@ -198,11 +205,11 @@ func (m *mlxModel) optimStep(ctx context.Context, params AdamParams) (OptimStepO
 }
 
 func (m *mlxModel) saveForSampler(_ context.Context, name string) (string, error) {
-	return m.saveAdapter(name, "sampler_weights", false)
+	return m.saveAdapter(name, kindSampler, false)
 }
 
 func (m *mlxModel) saveState(_ context.Context, name string) (string, error) {
-	return m.saveAdapter(name, "weights", true)
+	return m.saveAdapter(name, kindState, true)
 }
 
 func (m *mlxModel) saveAdapter(name, kind string, optimizer bool) (string, error) {
@@ -1161,6 +1168,13 @@ func ParseTinkerPath(path string) (TinkerPath, error) {
 		return TinkerPath{}, fmt.Errorf("invalid tinker checkpoint type %q", parts[1])
 	}
 	return TinkerPath{ModelID: parts[0], Kind: parts[1], Name: parts[2]}, nil
+}
+
+// checkpointTinkerPath builds the tinker:// path for a checkpoint identified by
+// model, kind, and name. The name is cleaned the same way saveAdapter does so
+// existence checks match the directory saveAdapter would write.
+func checkpointTinkerPath(modelID, kind, name string) string {
+	return "tinker://" + modelID + "/" + kind + "/" + cleanName(name)
 }
 
 func CheckpointPathExists(path string) bool {
