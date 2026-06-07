@@ -1,0 +1,2 @@
+applied 2026-06-06 by claude-code model=claude-opus-4-8[1m] tty=n/a pid=59245 iterm_session=w6t2p0:0EDDEDC3-99EB-4C38-AC20-B9405E570845
+gap: weightsInfo returned hardcoded LoRA train_mlp/train_attn/train_unembed; now stores+echoes per-model flags (SDK service_client.py:125-131,280-284)
