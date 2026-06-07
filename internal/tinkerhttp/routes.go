@@ -1014,11 +1014,16 @@ func (s *Server) weightsInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	base := "Qwen/Qwen3-8B"
 	rank := 8
+	// Default to the SDK's LoraConfig defaults (all true) when no model is found.
+	trainMLP, trainAttn, trainUnembed := true, true, true
 	if req.TinkerPath != "" {
 		if parsed, err := tinkertrain.ParseTinkerPath(req.TinkerPath); err == nil {
 			if model, err := s.coord.GetModel(r.Context(), parsed.ModelID); err == nil {
 				base = model.BaseModel
 				rank = model.LoRARank
+				trainMLP = model.TrainMLP
+				trainAttn = model.TrainAttn
+				trainUnembed = model.TrainUnembed
 			}
 		}
 	}
@@ -1026,9 +1031,9 @@ func (s *Server) weightsInfo(w http.ResponseWriter, r *http.Request) {
 		"base_model":    base,
 		"is_lora":       true,
 		"lora_rank":     rank,
-		"train_unembed": false,
-		"train_mlp":     true,
-		"train_attn":    true,
+		"train_unembed": trainUnembed,
+		"train_mlp":     trainMLP,
+		"train_attn":    trainAttn,
 	})
 }
 

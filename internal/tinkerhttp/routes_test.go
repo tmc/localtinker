@@ -275,6 +275,51 @@ func TestWeightsInfoRejectsMalformedJSON(t *testing.T) {
 	}
 }
 
+func TestWeightsInfoReflectsTrainingConfig(t *testing.T) {
+	store := tinkerdb.OpenMemory()
+	c, err := tinkercoord.New(tinkercoord.Config{Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+
+	// Model created with non-default LoRA flags (train_mlp=false, others true).
+	if err := store.PutModel(nil, tinkerdb.Model{
+		ID:           "model-a",
+		BaseModel:    "Qwen/Qwen3-8B",
+		TokenizerID:  "Qwen/Qwen3-8B",
+		IsLoRA:       true,
+		LoRARank:     16,
+		TrainMLP:     false,
+		TrainAttn:    true,
+		TrainUnembed: true,
+		CreatedAt:    time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var info struct {
+		BaseModel    string `json:"base_model"`
+		IsLoRA       bool   `json:"is_lora"`
+		LoRARank     int    `json:"lora_rank"`
+		TrainMLP     bool   `json:"train_mlp"`
+		TrainAttn    bool   `json:"train_attn"`
+		TrainUnembed bool   `json:"train_unembed"`
+	}
+	postJSON(t, h, "/api/v1/weights_info",
+		map[string]any{"tinker_path": "tinker://model-a/weights/ckpt"}, &info)
+	if info.LoRARank != 16 || info.TrainMLP != false || info.TrainAttn != true || info.TrainUnembed != true {
+		t.Fatalf("weights_info = %#v, want rank 16 mlp=false attn=true unembed=true", info)
+	}
+
+	// Unknown path falls back to the SDK's LoraConfig defaults (all true).
+	postJSON(t, h, "/api/v1/weights_info",
+		map[string]any{"tinker_path": "tinker://model-missing/weights/ckpt"}, &info)
+	if !info.TrainMLP || !info.TrainAttn || !info.TrainUnembed {
+		t.Fatalf("weights_info fallback = %#v, want all train flags true", info)
+	}
+}
+
 func TestRetrieveFutureRoute(t *testing.T) {
 	store := tinkerdb.OpenMemory()
 	c, err := tinkercoord.New(tinkercoord.Config{Store: store})

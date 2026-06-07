@@ -86,11 +86,14 @@ type CreateModelRequest struct {
 }
 
 type ModelInfo struct {
-	ID          string
-	BaseModel   string
-	TokenizerID string
-	IsLoRA      bool
-	LoRARank    int
+	ID           string
+	BaseModel    string
+	TokenizerID  string
+	IsLoRA       bool
+	LoRARank     int
+	TrainMLP     bool
+	TrainAttn    bool
+	TrainUnembed bool
 }
 
 type ServerCapabilities struct {
@@ -611,14 +614,20 @@ func (c *Coordinator) CreateModel(ctx context.Context, req CreateModelRequest) (
 		base = "Qwen/Qwen3-8B"
 	}
 	rank := intFromMap(req.LoRAConfig, "rank")
+	// The SDK's LoraConfig defaults train_mlp, train_attn, and train_unembed
+	// to true (lora_config.py); mirror that when the field is absent so
+	// weightsInfo can echo what the user requested on resume.
 	model := tinkerdb.Model{
-		ID:          id,
-		SessionID:   req.SessionID,
-		BaseModel:   base,
-		TokenizerID: base,
-		IsLoRA:      req.LoRAConfig != nil,
-		LoRARank:    rank,
-		CreatedAt:   now,
+		ID:           id,
+		SessionID:    req.SessionID,
+		BaseModel:    base,
+		TokenizerID:  base,
+		IsLoRA:       req.LoRAConfig != nil,
+		LoRARank:     rank,
+		TrainMLP:     boolFromMap(req.LoRAConfig, "train_mlp", true),
+		TrainAttn:    boolFromMap(req.LoRAConfig, "train_attn", true),
+		TrainUnembed: boolFromMap(req.LoRAConfig, "train_unembed", true),
+		CreatedAt:    now,
 	}
 	if err := c.train.Create(ctx, id, tinkertrain.CreateConfig{
 		BaseModel: base,
@@ -1429,11 +1438,14 @@ func fromDBFuture(future tinkerdb.Future) Future {
 
 func fromDBModel(model tinkerdb.Model) ModelInfo {
 	return ModelInfo{
-		ID:          model.ID,
-		BaseModel:   model.BaseModel,
-		TokenizerID: model.TokenizerID,
-		IsLoRA:      model.IsLoRA,
-		LoRARank:    model.LoRARank,
+		ID:           model.ID,
+		BaseModel:    model.BaseModel,
+		TokenizerID:  model.TokenizerID,
+		IsLoRA:       model.IsLoRA,
+		LoRARank:     model.LoRARank,
+		TrainMLP:     model.TrainMLP,
+		TrainAttn:    model.TrainAttn,
+		TrainUnembed: model.TrainUnembed,
 	}
 }
 
@@ -1448,6 +1460,15 @@ func intFromMap(m map[string]any, key string) int {
 	default:
 		return 0
 	}
+}
+
+// boolFromMap returns m[key] as a bool, falling back to def when the key is
+// absent or not a bool.
+func boolFromMap(m map[string]any, key string, def bool) bool {
+	if v, ok := m[key].(bool); ok {
+		return v
+	}
+	return def
 }
 
 func futurePath(raw json.RawMessage) string {

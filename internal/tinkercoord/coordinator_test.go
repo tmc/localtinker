@@ -882,3 +882,27 @@ func eventuallyStoredState(t *testing.T, store tinkerdb.Store, id, want string) 
 		time.Sleep(time.Millisecond)
 	}
 }
+
+func TestBoolFromMap(t *testing.T) {
+	tests := []struct {
+		name string
+		m    map[string]any
+		key  string
+		def  bool
+		want bool
+	}{
+		{"present true", map[string]any{"train_mlp": true}, "train_mlp", false, true},
+		{"present false", map[string]any{"train_mlp": false}, "train_mlp", true, false},
+		{"missing uses default true", map[string]any{}, "train_mlp", true, true},
+		{"missing uses default false", map[string]any{}, "train_mlp", false, false},
+		{"nil map uses default", nil, "train_mlp", true, true},
+		{"wrong type uses default", map[string]any{"train_mlp": "yes"}, "train_mlp", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := boolFromMap(tt.m, tt.key, tt.def); got != tt.want {
+				t.Fatalf("boolFromMap = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

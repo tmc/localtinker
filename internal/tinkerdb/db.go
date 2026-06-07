@@ -92,13 +92,16 @@ type FutureAttempt struct {
 }
 
 type Model struct {
-	ID          string    `json:"id"`
-	SessionID   string    `json:"session_id"`
-	BaseModel   string    `json:"base_model"`
-	TokenizerID string    `json:"tokenizer_id"`
-	IsLoRA      bool      `json:"is_lora"`
-	LoRARank    int       `json:"lora_rank"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID           string    `json:"id"`
+	SessionID    string    `json:"session_id"`
+	BaseModel    string    `json:"base_model"`
+	TokenizerID  string    `json:"tokenizer_id"`
+	IsLoRA       bool      `json:"is_lora"`
+	LoRARank     int       `json:"lora_rank"`
+	TrainMLP     bool      `json:"train_mlp"`
+	TrainAttn    bool      `json:"train_attn"`
+	TrainUnembed bool      `json:"train_unembed"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type Node struct {
