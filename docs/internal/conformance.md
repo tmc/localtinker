@@ -224,6 +224,33 @@ local equivalent and intentionally not surfaced); sparse CSR rehydration was
 already implemented in the prior audit; the remaining SDK changes are
 client-only.
 
+## Total parity sweep (2026-06-06, upstream b1e4ee3 / v0.22.3)
+
+A full route-by-route parity sweep of localtinker against the current upstream
+Tinker SDK (`b1e4ee3`, v0.22.3) confirmed all endpoint groups at parity for the
+single-tenant local surface, and closed one remaining response-fidelity gap:
+
+- `weights_info` now reflects each model's real LoRA training configuration.
+  `CreateModel` records `train_mlp`/`train_attn`/`train_unembed` from the SDK's
+  `lora_config` (`service_client.py:125-131`, defaulting to `LoraConfig`'s
+  all-true values when absent), and the `weights_info` handler echoes the stored
+  flags instead of the previous hardcoded `train_unembed=false,
+  train_mlp=true, train_attn=true`. The SDK reads these back during
+  `create_training_client_from_state` (`service_client.py:280-284`) to recreate a
+  training client, so resume workflows that used non-default flags now round-trip
+  correctly. Unknown paths still fall back to the SDK's `LoraConfig` defaults.
+  Pinned by `internal/tinkerhttp.TestWeightsInfoReflectsTrainingConfig` and
+  `internal/tinkercoord.TestBoolFromMap`.
+
+Deliberately out of scope (return a local error for unsupported hosted features,
+never a silent stub): audit-log/RBAC, `assign_session_project` (multi-tenant),
+`weights_access_token`, hosted signed-URL emulation, cross-owner auth, JWT
+(disabled), billing 402, telemetry internals. Client-only and therefore no
+server change: pyqwest transport, proto/zstd forward-backward (flag default-off;
+localtinker advertises nothing so the SDK uses JSON), retry-handler/`_APIFuture`
+internals, stuck-detection, and the CLI. Numeric MLX-vs-hosted differences remain
+expected and documented.
+
 ## Can We Publicize?
 
 Current answer: not yet for a broad public launch. It is close enough for a
