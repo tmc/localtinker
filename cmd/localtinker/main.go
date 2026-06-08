@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/tmc/localtinker/internal/tinkercoord"
@@ -44,11 +45,24 @@ func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:8080", "HTTP listen address")
 	home := fs.String("home", defaultHome(), "state directory")
+	maxOps := fs.Int("max-operations", 0, "max concurrent operations (default 1)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
 		return err
+	}
+
+	operations := *maxOps
+	if operations <= 0 {
+		if env := os.Getenv("LOCALTINKER_MAX_OPERATIONS"); env != "" {
+			if n, err := strconv.Atoi(env); err == nil {
+				operations = n
+			}
+		}
+	}
+	if operations <= 0 {
+		operations = 1
 	}
 
 	store, err := tinkerdb.OpenJSON(filepath.Join(*home, "tinker.json"))
@@ -57,7 +71,7 @@ func serve(args []string) error {
 	}
 	defer store.Close()
 
-	coord, err := tinkercoord.New(tinkercoord.Config{Store: store})
+	coord, err := tinkercoord.New(tinkercoord.Config{Store: store, MaxOperations: operations})
 	if err != nil {
 		return err
 	}
