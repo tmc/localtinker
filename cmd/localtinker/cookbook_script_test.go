@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,46 +51,76 @@ func TestCookbookRecipeScript(t *testing.T) {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 
-	addr := freeAddr(t)
-	serverLog, stop := startServer(t, bin, addr)
-	t.Cleanup(stop)
-	waitHealthy(t, "http://"+addr+"/api/v1/healthz", serverLog)
+	recipes, err := filepath.Glob("testdata/recipe_*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recipes) == 0 {
+		t.Fatal("no recipe scripts in testdata")
+	}
 
 	cmds := scripttest.DefaultCmds()
 	delete(cmds, "exec")
 	cmds["python"] = script.Program(python, nil, 0)
-
 	engine := &script.Engine{
 		Cmds:  cmds,
 		Conds: scripttest.DefaultConds(),
 	}
-	env := []string{
-		// Fresh HOME isolates the recipe's /tmp/tinker-examples log dirs.
-		"HOME=" + t.TempDir(),
-		"PATH=" + os.Getenv("PATH"),
-		"PYTHONPATH=" + filepath.Join(sdk, "src") + string(os.PathListSeparator) + cookbook,
-		"TINKER_API_KEY=tml-local-test",
-		"TINKER_BASE_URL=http://" + addr,
-		"LOCALTINKER_QWEN3_8B_MLX_BASE=" + qwen3MLXModel,
-		"HF_HUB_OFFLINE=1",
-		"TRANSFORMERS_OFFLINE=1",
-		// HOME above would hide the real HuggingFace cache, so point HF at it
-		// explicitly (honoring any HF_HOME already set) for offline loads.
-		"HF_HOME=" + hfHome(),
-	}
-	// Pass through an explicit cache override so the offline cache is found.
-	if v := os.Getenv("HUGGINGFACE_HUB_CACHE"); v != "" {
-		env = append(env, "HUGGINGFACE_HUB_CACHE="+v)
-	}
 
-	// MLX recipe runs take minutes; cap each script so a hung recipe fails
-	// rather than blocking the suite forever. scripttest runs each script as a
-	// t.Parallel subtest, so the timeout must outlive this function: use
-	// t.Cleanup, not defer, or the context cancels before any recipe runs.
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
-	t.Cleanup(cancel)
+	// localtinker serves MLX operations one at a time, so concurrent recipes
+	// sharing a server would starve each other until the SDK's future waits
+	// time out. Run each recipe sequentially against its own fresh server,
+	// matching how a user drives a single recipe at a time.
+	for _, recipe := range recipes {
+		name := strings.TrimSuffix(filepath.Base(recipe), ".txt")
+		t.Run(name, func(t *testing.T) {
+			// scripttest.Test globs a pattern, so stage this one recipe alone
+			// in a temp dir and point the glob at it.
+			dir := t.TempDir()
+			data, err := os.ReadFile(recipe)
+			if err != nil {
+				t.Fatal(err)
+			}
+			staged := filepath.Join(dir, filepath.Base(recipe))
+			if err := os.WriteFile(staged, data, 0644); err != nil {
+				t.Fatal(err)
+			}
 
-	scripttest.Test(t, ctx, engine, env, "testdata/recipe_*.txt")
+			addr := freeAddr(t)
+			serverLog, stop := startServer(t, bin, addr)
+			t.Cleanup(stop)
+			waitHealthy(t, "http://"+addr+"/api/v1/healthz", serverLog)
+
+			env := []string{
+				// Fresh HOME isolates the recipe's /tmp/tinker-examples log dirs.
+				"HOME=" + t.TempDir(),
+				"PATH=" + os.Getenv("PATH"),
+				"PYTHONPATH=" + filepath.Join(sdk, "src") + string(os.PathListSeparator) + cookbook,
+				"TINKER_API_KEY=tml-local-test",
+				"TINKER_BASE_URL=http://" + addr,
+				"LOCALTINKER_QWEN3_8B_MLX_BASE=" + qwen3MLXModel,
+				"HF_HUB_OFFLINE=1",
+				"TRANSFORMERS_OFFLINE=1",
+				// HOME above would hide the real HuggingFace cache, so point HF
+				// at it explicitly (honoring any HF_HOME already set).
+				"HF_HOME=" + hfHome(),
+			}
+			// Pass through an explicit cache override so the offline cache is found.
+			if v := os.Getenv("HUGGINGFACE_HUB_CACHE"); v != "" {
+				env = append(env, "HUGGINGFACE_HUB_CACHE="+v)
+			}
+
+			// MLX recipe runs take minutes; cap each script so a hung recipe
+			// fails rather than blocking the suite forever. scripttest runs the
+			// script as a t.Parallel subtest, so the timeout must outlive this
+			// function: use t.Cleanup, not defer, or it cancels before the
+			// recipe runs.
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+			t.Cleanup(cancel)
+
+			scripttest.Test(t, ctx, engine, env, filepath.Join(dir, "recipe_*.txt"))
+		})
+	}
 }
 
 // checkPythonCookbook reports whether python can import the cookbook stack and
