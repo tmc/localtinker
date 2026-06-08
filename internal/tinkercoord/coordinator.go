@@ -779,16 +779,15 @@ func (c *Coordinator) LoadWeightsWithOptimizer(ctx context.Context, modelID, pat
 	if err := c.train.LoadStateWithOptimizer(ctx, modelID, path, optimizer); err != nil {
 		return c.UserErrorFuture(ctx, err.Error())
 	}
-	typ := "load_weights"
-	if optimizer {
-		typ = "load_state_with_optimizer"
-	}
+	// The SDK decodes both the plain and optimizer loads into LoadWeightsResponse,
+	// whose type is Literal["load_weights"]; the optimizer load is distinguished
+	// by the optimizer_state flag, not the type. Always report "load_weights".
 	return c.CompleteFuture(ctx, map[string]any{
-		"type":            typ,
+		"type":            "load_weights",
 		"path":            path,
 		"optimizer_state": optimizer,
 	}, map[string]any{
-		"type":            typ,
+		"type":            "load_weights",
 		"model_id":        modelID,
 		"path":            path,
 		"optimizer_state": optimizer,
