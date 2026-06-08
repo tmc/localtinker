@@ -251,6 +251,69 @@ localtinker advertises nothing so the SDK uses JSON), retry-handler/`_APIFuture`
 internals, stuck-detection, and the CLI. Numeric MLX-vs-hosted differences remain
 expected and documented.
 
+## Ecosystem Parity (2026-06-08, unmodified tinker-cookbook recipes)
+
+Wire parity asks whether localtinker speaks the SDK's protocol; ecosystem
+parity asks the harder question: does an *unmodified* `tinker-cookbook` recipe
+run against it end to end? `internal/tinkerhttp.TestCookbookRecipeScript`
+(`cmd/localtinker/cookbook_script_test.go`) answers it by booting a localtinker
+server and running real cookbook recipes (`testdata/recipe_*.txt`) through
+rsc.io/script against the cached `mlx-community/Qwen3-0.6B-bf16` weights. Each
+recipe runs on its own server because localtinker serves MLX operations one at a
+time; recipes that download datasets, need an external judge/teacher API, or
+require a cloud sandbox cannot run offline in CI and are skipped with a reason
+rather than silently dropped.
+
+Recipes that pass unmodified (model targeted as `Qwen/Qwen3-8B`, which the
+server maps to the local 0.6B MLX checkpoint):
+
+- **chat_sl** (supervised fine-tuning) — one LoRA step over an inline JSONL
+  conversation dataset, then a resume from the saved checkpoint. Asserts
+  `train_mean_nll` and the `state_path` checkpoint are written, and the resume
+  reloads optimizer state and logs the resume line. `testdata/recipe_chat_sl.txt`.
+- **math_rl** (GRPO) — one step on the synthetic offline `arithmetic`
+  environment: samples rollouts, computes group rewards, trains. Asserts
+  `reward/total`. `testdata/recipe_math_rl.txt`.
+- **preference / shorter** (DPO-family) — pairwise-preference RL where the
+  comparison dataset is an in-process dummy and the preference signal is response
+  length, with no judge or teacher model. Asserts `reward/total`.
+  `testdata/recipe_preference.txt`.
+
+Real server gap found and fixed by running these recipes:
+
+- **Optimizer-resume response type** — the chat_sl resume failed because the
+  coordinator tagged the optimizer-state load's future result with
+  `type="load_state_with_optimizer"`, but the SDK retrieves it into
+  `LoadWeightsResponse`, whose type is `Literal["load_weights"]`, so pydantic
+  rejected it. The optimizer load is distinguished by the `optimizer_state`
+  flag, not the type; the coordinator now always reports `load_weights`
+  (`internal/tinkercoord.LoadWeightsWithOptimizer`). This unblocked every
+  cookbook recipe that resumes from a saved state. The existing route tests only
+  covered the error paths, so the success-path type was never asserted before;
+  the chat_sl recipe is now its regression test.
+
+Skipped, with reason (cannot run unmodified offline in CI — none is a localtinker
+server gap):
+
+- **preference / dpo, rlhf** — pull HuggingFace datasets (`Anthropic/hh-rlhf`,
+  `nvidia/HelpSteer3`, `argilla/ultrafeedback`) over the network; fail under the
+  harness's `HF_HUB_OFFLINE=1`. Only `shorter` is offline.
+- **distillation / sdft** — has an offline local-Arrow dataset branch, but its
+  final-step evaluator hits a cookbook-internal bug
+  (`tinker_cookbook/rl/rollouts.py:264` calls `.cleanup()` on a `list`), which
+  fires whenever the 0.9/0.1 split leaves a non-empty test set — i.e. always.
+  The bug is in the cookbook's RL test-set evaluator, not localtinker (the server
+  served every sampling request up to that point). No CLI flag disables the
+  split or the eval, so it cannot run unmodified.
+- **evaluation** — no `recipes/evaluation/` family; the only eval entrypoint
+  (`tinker_cookbook/eval/run_inspect_evals.py`) imports `inspect_ai` (absent from
+  the venv), and the benchmark path downloads HF datasets with no synthetic
+  fallback. It also emits no `metrics.jsonl` to assert against.
+- **tool_use** — no `recipes/tool_use/` training entrypoint; `search_tool`
+  requires a HuggingFace dataset download, a running Chroma vector-DB server, and
+  the Google Gemini embedding API, and `harbor_rl` requires a Modal cloud Docker
+  sandbox and an externally populated task cache.
+
 ## Can We Publicize?
 
 Current answer: not yet for a broad public launch. It is close enough for a
