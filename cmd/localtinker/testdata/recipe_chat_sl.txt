@@ -1,0 +1,20 @@
+# chat_sl supervised fine-tuning recipe: one short step, then resume.
+# model_name=Qwen/Qwen3-8B is mapped to the cached 0.6B MLX checkpoint by the
+# server; renderer_name=qwen3 avoids any renderer lookup. Flags are verified
+# against recipes/chat_sl/train.py CLIConfig.
+
+python -m tinker_cookbook.recipes.chat_sl.train model_name=Qwen/Qwen3-8B renderer_name=qwen3 dataset=$WORK/data.jsonl log_path=$WORK/run max_steps=1 num_epochs=1 batch_size=2 lora_rank=4 save_every=1 eval_every=1000 behavior_if_log_dir_exists=delete
+exists $WORK/run/metrics.jsonl
+grep train_mean_nll $WORK/run/metrics.jsonl
+exists $WORK/run/checkpoints.jsonl
+grep state_path $WORK/run/checkpoints.jsonl
+
+# Resume from the checkpoint just written; the recipe logs the resume line.
+python -m tinker_cookbook.recipes.chat_sl.train model_name=Qwen/Qwen3-8B renderer_name=qwen3 dataset=$WORK/data.jsonl log_path=$WORK/run max_steps=1 num_epochs=1 batch_size=2 lora_rank=4 save_every=1 eval_every=1000 behavior_if_log_dir_exists=resume
+stderr 'Resumed training from'
+
+-- data.jsonl --
+{"messages": [{"role": "user", "content": "What is 2 plus 2?"}, {"role": "assistant", "content": "2 plus 2 is 4."}]}
+{"messages": [{"role": "user", "content": "Name a primary color."}, {"role": "assistant", "content": "Red is a primary color."}]}
+{"messages": [{"role": "user", "content": "What is the capital of France?"}, {"role": "assistant", "content": "The capital of France is Paris."}]}
+{"messages": [{"role": "user", "content": "Say hello."}, {"role": "assistant", "content": "Hello!"}]}
