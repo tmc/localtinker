@@ -83,9 +83,11 @@ func TestCookbookRecipeScript(t *testing.T) {
 	}
 
 	// MLX recipe runs take minutes; cap each script so a hung recipe fails
-	// rather than blocking the suite forever.
+	// rather than blocking the suite forever. scripttest runs each script as a
+	// t.Parallel subtest, so the timeout must outlive this function: use
+	// t.Cleanup, not defer, or the context cancels before any recipe runs.
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
-	defer cancel()
+	t.Cleanup(cancel)
 
 	scripttest.Test(t, ctx, engine, env, "testdata/recipe_*.txt")
 }
