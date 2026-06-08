@@ -1,0 +1,18 @@
+# preference/shorter pairwise-preference RL recipe: one short step.
+# This recipe is fully offline: the comparison dataset is an in-process dummy
+# (recipes/preference/shorter/env.py:25 DUMMY_DATASET = Dataset.from_list(...))
+# and the preference signal is response length, computed locally with no judge
+# or teacher model (env.py:28 PreferenceModelShorter). The other preference
+# families (dpo, rlhf) pull HuggingFace datasets over the network, so only
+# shorter runs unmodified in CI.
+#
+# model_name=Qwen/Qwen3-8B is mapped to the cached 0.6B MLX checkpoint by the
+# server; renderer_name=qwen3 avoids any renderer lookup. RL samples a group of
+# completions then trains; with the default 1-slot semaphore this is serialized
+# but correct, so the script makes no concurrency assumption. Flags are verified
+# against recipes/preference/shorter/train.py CLIConfig. The reward metric key
+# reward/total is written by rl/metric_util.py:124.
+
+python -m tinker_cookbook.recipes.preference.shorter.train model_name=Qwen/Qwen3-8B renderer_name=qwen3 log_path=$WORK/run batch_size=1 group_size=2 max_tokens=8 eval_every=1000 max_steps=1 behavior_if_log_dir_exists=delete
+exists $WORK/run/metrics.jsonl
+grep reward/total $WORK/run/metrics.jsonl
