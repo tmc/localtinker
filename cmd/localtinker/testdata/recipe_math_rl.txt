@@ -1,0 +1,11 @@
+# math_rl GRPO recipe: one short step on the synthetic offline arithmetic env.
+# env=arithmetic is generated in-process (no dataset download). model_name=
+# Qwen/Qwen3-8B is mapped to the cached 0.6B MLX checkpoint by the server;
+# renderer_name=qwen3 avoids any renderer lookup. RL samples rollouts then
+# trains; with the default 1-slot semaphore this is serialized but correct, so
+# the script makes no concurrency assumption. Flags are verified against
+# recipes/math_rl/train.py CLIConfig.
+
+python -m tinker_cookbook.recipes.math_rl.train model_name=Qwen/Qwen3-8B renderer_name=qwen3 env=arithmetic log_path=$WORK/run max_steps=1 group_size=2 groups_per_batch=2 max_tokens=5 behavior_if_log_dir_exists=delete
+exists $WORK/run/metrics.jsonl
+grep reward/total $WORK/run/metrics.jsonl
