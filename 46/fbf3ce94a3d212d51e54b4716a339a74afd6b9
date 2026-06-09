@@ -1,0 +1,2 @@
+2026-06-08 — claude-code (Opus 4.8 / claude-opus-4-8), tty=not a tty
+n/a, pid=14342, ITERM_SESSION_ID=w5t1p2:F8D1735D-7097-4B83-8CF7-30BC960BAAF8. Custom-loss gap fix commit 3/4 (DPO recipe). dpo_loss=0.709517 logged end-to-end.
