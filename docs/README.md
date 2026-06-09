@@ -56,6 +56,16 @@ The coordinator also serves an embedded dashboard and docs pages:
 - `/quickstart`: commands for a short local SDK run.
 - `/api`: browser API reference summary.
 
+## Cookbook Recipes
+
+localtinker runs unmodified `tinker-cookbook` recipes, not just isolated SDK
+calls. The supervised (chat_sl), GRPO (math_rl), and preference recipes —
+including a real DPO step through the SDK's `forward_backward_custom` custom-loss
+path — train end to end against a booted server. Recipes that need network
+datasets, an external judge or teacher API, or a cloud sandbox are skipped with a
+reason. See [internal conformance](internal/conformance.md) for the supported and
+skipped recipe list.
+
 ## Compatibility Notes
 
 localtinker intentionally differs from the hosted service in a few places:
