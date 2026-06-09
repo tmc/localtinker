@@ -1,0 +1,17 @@
+# preference/dpo recipe: one DPO step on the hhh dataset. This exercises the
+# SDK's forward_backward_custom path (train_dpo.do_update calls
+# forward_backward_custom(data, dpo_loss_fn) at preference/train_dpo.py:436),
+# which sends a backward cross_entropy pass with signed weights = -gradient. The
+# server must accept those signed weights and use the unnormalized cross-entropy
+# surrogate; rejecting them (the original gap) broke every custom loss.
+#
+# dataset=hhh maps to datasets.load_dataset("Anthropic/hh-rlhf"), satisfied
+# offline from a small pre-provisioned classic-cache fixture under
+# $HF_HOME/datasets/Anthropic___hh-rlhf (HF_HUB_OFFLINE=1 is set by the harness).
+# The test skips when that fixture is absent. model_name=Qwen/Qwen3-8B is mapped
+# to the cached 0.6B MLX checkpoint by the server. Flags verified against
+# recipes/preference/dpo/train.py CLIConfig.
+
+python -m tinker_cookbook.recipes.preference.dpo.train model_name=Qwen/Qwen3-8B renderer_name=qwen3 dataset=hhh log_path=$WORK/run max_steps=1 batch_size=2 dpo_beta=0.1 max_length=512 learning_rate=1e-5 behavior_if_log_dir_exists=delete
+exists $WORK/run/metrics.jsonl
+grep dpo_loss $WORK/run/metrics.jsonl

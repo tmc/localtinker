@@ -24,6 +24,14 @@ const cookbookPython = "/Users/tmc/.cache/localtinker-cookbook-venv/bin/python"
 // qwen3MLXModel is the cached MLX checkpoint the server maps Qwen/Qwen3-8B to.
 const qwen3MLXModel = "mlx-community/Qwen3-0.6B-bf16"
 
+// recipeDatasetFixture maps a recipe to the HuggingFace classic-cache dataset
+// directory (under $HF_HOME/datasets) it loads offline. Recipes listed here skip
+// when their fixture is absent. recipe_dpo loads datasets.load_dataset(
+// "Anthropic/hh-rlhf"); a small fixture is provisioned out of band.
+var recipeDatasetFixture = map[string]string{
+	"recipe_dpo": "Anthropic___hh-rlhf",
+}
+
 // TestCookbookRecipeScript runs unmodified tinker-cookbook recipes against a
 // booted localtinker under rsc.io/script. It skips (rather than fails) when the
 // cookbook checkout, a suitable python, or the cached MLX weights are absent.
@@ -74,6 +82,14 @@ func TestCookbookRecipeScript(t *testing.T) {
 	for _, recipe := range recipes {
 		name := strings.TrimSuffix(filepath.Base(recipe), ".txt")
 		t.Run(name, func(t *testing.T) {
+			// Recipes that read a pre-provisioned offline dataset skip (not fail)
+			// when that fixture is absent, like the cached MLX weights do.
+			if fixture, ok := recipeDatasetFixture[name]; ok {
+				if _, err := os.Stat(filepath.Join(hfHome(), "datasets", fixture)); err != nil {
+					t.Skipf("offline dataset fixture %s not provisioned: %v", fixture, err)
+				}
+			}
+
 			// scripttest.Test globs a pattern, so stage this one recipe alone
 			// in a temp dir and point the glob at it.
 			dir := t.TempDir()
