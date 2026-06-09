@@ -1,0 +1,2 @@
+2026-06-08 — claude-code (Opus 4.8 / claude-opus-4-8), tty=not a tty
+n/a, pid=14056, ITERM_SESSION_ID=w5t1p2:F8D1735D-7097-4B83-8CF7-30BC960BAAF8. Custom-loss gap fix commit 1/4 (math). Numeric no-regression verified byte-identical: chat_sl train_mean_nll=5.0362725257873535, math_rl reward/total=-0.1.
