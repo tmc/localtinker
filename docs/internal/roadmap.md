@@ -63,6 +63,13 @@ and close enough to hosted Tinker that ordinary SDK workflows behave the same.
 - Sampling returns generated token logprobs, prompt logprobs, and top-k prompt
   logprobs, and accepts tokenizer-backed string stops.
 - Checkpoints include local optimizer state and archive metadata headers.
+- Unmodified `tinker-cookbook` recipes (chat_sl, math_rl, preference/shorter,
+  preference/dpo) run end to end against a booted server.
+- `forward_backward_custom` custom losses (including DPO) are served: a signed
+  `cross_entropy` backward pass uses an unnormalized sum so the gradient matches
+  the SDK contract.
+- The coordinator concurrency limit is configurable with `-max-operations`
+  (default 1, matching the local MLX memory floor).
 
 ## 1. SDK Conformance
 
@@ -88,7 +95,8 @@ behavior.
 - Keep coverage for rectangular dense target tensors.
 - Reject ragged tensors and shape/data mismatches at the HTTP boundary.
 - Keep support for targets that are not just `model_input` shifted left by one.
-- Keep support for arbitrary valid float weights.
+- Keep support for arbitrary valid float weights, including the signed weights
+  the SDK sends to backpropagate a `forward_backward_custom` loss.
 - Validate target/weight shape compatibility.
 - Return real per-token logprobs where the SDK expects them.
 
@@ -186,6 +194,21 @@ Goal: keep local behavior honest against hosted Tinker.
 - Compare response shapes, metric names, checkpoint metadata, and sampler
   behavior.
 - Track differences in `docs/internal/conformance.md`.
+
+## 11. Ecosystem Parity
+
+Goal: run *unmodified* `tinker-cookbook` recipes against localtinker, not just
+speak the SDK wire protocol.
+
+- Keep the cookbook recipe tests (`cmd/localtinker/cookbook_script_test.go`)
+  passing: chat_sl, math_rl, preference/shorter, and preference/dpo, each on its
+  own server because the MLX backend serves operations one at a time.
+- Keep `forward_backward_custom` served for custom losses, proven by the
+  unmodified DPO recipe exercising `dpo_loss_fn`.
+- Keep recipes blocked only by the cookbook's own network, cloud, or external
+  dependencies (rlhf, sdft, evaluation, tool_use) skipped with a reason, not
+  silently dropped.
+- Record the supported and skipped recipes in `docs/internal/conformance.md`.
 
 ## Known Gaps
 
