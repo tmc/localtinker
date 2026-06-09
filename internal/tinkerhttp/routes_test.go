@@ -622,16 +622,6 @@ func TestTrainingInputValidationReturnsUserErrors(t *testing.T) {
 			},
 			want: "is not an integer",
 		},
-		{
-			name: "negative weight",
-			edit: func(d map[string]any) {
-				d["loss_fn_inputs"].(map[string]any)["weights"] = map[string]any{
-					"data":  []float64{1, -1, 1, 1},
-					"dtype": "float32",
-				}
-			},
-			want: "is not a non-negative finite number",
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -674,6 +664,39 @@ func TestTrainingInputValidationAcceptsDenseCrossEntropyTensors(t *testing.T) {
 
 	if err := normalizeAndValidateInput(&input); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestTrainingInputValidationAcceptsSignedCrossEntropyWeights locks that the
+// validation layer accepts the signed weights of a forward_backward_custom
+// backward pass (weights = -grad) for cross_entropy. The old non-negativity
+// gate rejected these, breaking every custom loss including DPO.
+func TestTrainingInputValidationAcceptsSignedCrossEntropyWeights(t *testing.T) {
+	input := tinkertrain.ForwardBackwardInput{
+		LossFn: "cross_entropy",
+		Data: []tinkertrain.Datum{{
+			ModelInput: tinkertrain.ModelInput{Chunks: []tinkertrain.ModelInputChunk{{
+				Type:   "encoded_text",
+				Tokens: []int{1, 2, 3, 4},
+			}}},
+			LossFnInputs: map[string]tinkertrain.TensorData{
+				"target_tokens": {
+					Data:  []float64{9, 8, 7, 6},
+					DType: "int64",
+					Shape: []int{2, 2},
+				},
+				// Signed weights summing to ~0, as a balanced custom backward sends.
+				"weights": {
+					Data:  []float64{0.5, -0.25, -0.5, 0.25},
+					DType: "float32",
+					Shape: []int{2, 2},
+				},
+			},
+		}},
+	}
+
+	if err := normalizeAndValidateInput(&input); err != nil {
+		t.Fatalf("signed cross_entropy weights rejected: %v", err)
 	}
 }
 
@@ -834,6 +857,20 @@ func TestTrainingInputValidationRejectsPolicyLossInputs(t *testing.T) {
 				}
 			},
 			want: "is not finite",
+		},
+		{
+			// Only cross_entropy accepts the signed weights of a custom backward;
+			// policy losses still require non-negative mask weights.
+			name:   "negative weight rejected for policy loss",
+			lossFn: "importance_sampling",
+			edit: func(in *tinkertrain.ForwardBackwardInput) {
+				in.Data[0].LossFnInputs["weights"] = tinkertrain.TensorData{
+					Data:  []float64{1, -1, 1, 1},
+					DType: "float32",
+					Shape: []int{2, 2},
+				}
+			},
+			want: "is not a non-negative finite number",
 		},
 		{
 			name:   "unsupported policy key",

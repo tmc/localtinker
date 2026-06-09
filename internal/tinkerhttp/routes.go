@@ -732,12 +732,12 @@ func normalizeTensorData(name string, tensor tinkertrain.TensorData) (tinkertrai
 		if tensor.DType != "" && tensor.DType != "float32" {
 			return tensor, fmt.Errorf("dtype %q, want float32", tensor.DType)
 		}
+		// Weights may be negative for the forward_backward_custom backward pass
+		// (weights = -gradient); the non-negativity requirement for loss
+		// functions that need it is enforced per-loss-fn in validateLossDatum.
 		for i, v := range tensor.Data {
 			if math.IsNaN(v) || math.IsInf(v, 0) {
 				return tensor, fmt.Errorf("data[%d] = %v is not finite", i, v)
-			}
-			if name == "weights" && v < 0 {
-				return tensor, fmt.Errorf("data[%d] = %v is not a non-negative finite number", i, v)
 			}
 		}
 		tensor.DType = "float32"
@@ -751,6 +751,15 @@ func validateLossDatum(lossFn string, i int, datum tinkertrain.Datum) error {
 	}
 	if policyLoss(lossFn) {
 		target := datum.LossFnInputs["target_tokens"]
+		// Policy losses use weights as non-negative masks; only cross_entropy
+		// accepts the signed weights of a forward_backward_custom backward pass.
+		if weight, ok := datum.LossFnInputs["weights"]; ok {
+			for j, v := range weight.Data {
+				if v < 0 {
+					return fmt.Errorf("datum %d weights[%d] = %v is not a non-negative finite number", i, j, v)
+				}
+			}
+		}
 		for _, name := range []string{"logprobs", "advantages"} {
 			tensor, ok := datum.LossFnInputs[name]
 			if !ok {
