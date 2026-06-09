@@ -278,8 +278,31 @@ server maps to the local 0.6B MLX checkpoint):
   comparison dataset is an in-process dummy and the preference signal is response
   length, with no judge or teacher model. Asserts `reward/total`.
   `testdata/recipe_preference.txt`.
+- **preference / dpo** (Direct Preference Optimization) — a real DPO step on the
+  `hhh` dataset, exercising the SDK's `forward_backward_custom` custom-loss path
+  (`train_dpo.do_update` → `forward_backward_custom(data, dpo_loss_fn)`). The
+  `Anthropic/hh-rlhf` dataset is satisfied offline from a small pre-provisioned
+  classic-cache fixture under `$HF_HOME/datasets/Anthropic___hh-rlhf` (the recipe
+  is unmodified; only the fixture is provisioned, and the test skips when it is
+  absent). Asserts `dpo_loss`. `testdata/recipe_dpo.txt`. **This run uncovered
+  and the fix unblocked the custom-loss server gap below.**
 
-Real server gap found and fixed by running these recipes:
+Real server gaps found and fixed by running these recipes:
+
+- **Custom-loss signed weights (`forward_backward_custom`)** — the DPO recipe
+  failed because the SDK backpropagates a client-side custom loss by sending a
+  `cross_entropy` backward pass with `weights = -gradient` (signed), but
+  localtinker rejected any negative weight at the parse and trainer layers and
+  weight-normalized the cross-entropy loss, so the gradient was wrong even if the
+  weights were accepted. The cross-entropy surrogate now uses the unnormalized
+  sum `L = sum(-logprobs·weights)` when any weight is negative (so
+  `dL/dlogprobs = -weights`, the contract `forward_backward_custom` relies on),
+  while standard non-negative-weight cross_entropy stays weight-normalized — a
+  negative weight is the only wire signal distinguishing a custom backward from an
+  SFT request. Verified additive: chat_sl `train_mean_nll` and math_rl
+  `reward/total` are byte-identical before and after
+  (`internal/tinkertrain.denseCrossEntropy`, `internal/tinkerhttp` validation,
+  `internal/tinkertrain.Datum.weights`). The DPO recipe is its regression test.
 
 - **Optimizer-resume response type** — the chat_sl resume failed because the
   coordinator tagged the optimizer-state load's future result with
@@ -295,16 +318,22 @@ Real server gap found and fixed by running these recipes:
 Skipped, with reason (cannot run unmodified offline in CI — none is a localtinker
 server gap):
 
-- **preference / dpo, rlhf** — pull HuggingFace datasets (`Anthropic/hh-rlhf`,
-  `nvidia/HelpSteer3`, `argilla/ultrafeedback`) over the network; fail under the
-  harness's `HF_HUB_OFFLINE=1`. Only `shorter` is offline.
-- **distillation / sdft** — has an offline local-Arrow dataset branch, but its
-  final-step evaluator hits a cookbook-internal bug
-  (`tinker_cookbook/rl/rollouts.py:264` calls `.cleanup()` on a `list`), which
-  fires whenever the 0.9/0.1 split leaves a non-empty test set — i.e. always.
-  The bug is in the cookbook's RL test-set evaluator, not localtinker (the server
-  served every sampling request up to that point). No CLI flag disables the
-  split or the eval, so it cannot run unmodified.
+- **preference / rlhf** — pulls other HuggingFace datasets (`nvidia/HelpSteer3`,
+  `argilla/ultrafeedback`) over the network with no local-file override; only
+  `dpo` (with the provisioned `hhh` fixture) and `shorter` run offline.
+- **distillation / sdft** — has an offline local-Arrow dataset branch, but the
+  unmodified recipe cannot reach even its first training step. The step-0 eval
+  runs before `build_topk_distillation_datums` (`recipes/sdft/train`/
+  `distillation/sdft.py`), and that eval crashes inside the cookbook: its
+  `SDFTDataset.get_batch` returns a 3-tuple, violating the `RLDataset`
+  `Sequence[EnvGroupBuilder]` contract, so `dataset_to_env_group_builders`
+  (`rl/metric_util.py`) yields a `list` and `rl/rollouts.py:243` calls
+  `.make_envs()` on it (`AttributeError`; the `.cleanup()` on the same `list` at
+  `:264` is the masking re-raise). `train_fraction` is hardcoded at `0.9` with no
+  CLI override, and no row count yields a non-empty train with an empty test set,
+  so the eval always fires. The bug is in the cookbook, not localtinker (the
+  server served every request up to the crash), so it cannot run unmodified — and
+  the `topk_prompt_logprobs` path it would exercise is gated behind the crash.
 - **evaluation** — no `recipes/evaluation/` family; the only eval entrypoint
   (`tinker_cookbook/eval/run_inspect_evals.py`) imports `inspect_ai` (absent from
   the venv), and the benchmark path downloads HF datasets with no synthetic
@@ -326,7 +355,7 @@ limited public beta only if the caveats below are stated plainly.
 | Checkpoint downloads | Local HTTP archive URLs and metadata are covered. `hosted comparison fixture` records the current local route shape. `hosted comparison fixture` records hosted owner signed-URL shape for sampler weights. `hosted comparison fixture` records hosted `401` invalid-credential denial for the same archive URL surface. Hosted cross-owner authorization still needs a valid second principal. | Disclose for beta; blocker for hosted-compatible wording. |
 | Futures and queueing | Local queue, cancellation, panic containment, unfinished-queue recovery, and local queue backpressure timing are covered. `hosted comparison fixture` records the local cancel route and SDK retrieve-only surface. `hosted comparison fixture` records hosted raw `/api/v1/cancel_future` returning 404. `hosted comparison fixture` records the local one-slot queue case. `hosted comparison fixture` records hosted accepting two concurrent futures and returning `queue_state:"active"` for both. `hosted comparison fixture` records local scheduler retry, cancel, lease, and dashboard-node evidence. | Beta-ready with queue-state caveat. |
 | Cross-entropy | Dense tensors, CSR `target_tokens`/`weights` rehydration, unsupported sparse tensor rejection, invalid weights, and logprobs are covered locally. `hosted comparison fixture` records matching hosted/local per-token logprob shapes and a forward loss mean difference. `hosted comparison fixture` records hosted arbitrary fractional dense weights succeeding with `loss:sum` and per-token outputs. | Beta-ready with numeric and metric-name caveats. |
-| Custom losses | `hosted comparison fixture` records hosted and local `forward_backward_custom` success and `custom_loss:mean` metric shape evidence. | Beta-ready with numeric caveats. |
+| Custom losses | `forward_backward_custom` is served locally end to end: the unmodified `preference/dpo` recipe trains a DPO step against localtinker (`recipe_dpo.txt`), logging `dpo_loss`/`accuracy`/`margin`. The SDK backpropagates a custom loss by sending a `cross_entropy` backward pass with signed `weights = -grad`; the cross-entropy surrogate uses the unnormalized sum for signed weights so `dL/dlogprobs = -weights` (`internal/tinkertrain.denseCrossEntropy`), while standard non-negative-weight cross_entropy stays weight-normalized (chat_sl `train_mean_nll` unchanged). `hosted comparison fixture` records hosted `custom_loss:mean` shape evidence. | Beta-ready with numeric caveats. |
 | Sampling | Generated logprobs, prompt logprobs, deterministic seed flow, string stops, and top-k prompt logprob shapes are covered locally and in hosted comparison rows. `hosted comparison fixture` records live hosted seeded samples for fixed token prompts; `hosted comparison fixture` records the paired local Qwen/Qwen3-8B run and matching sequence/logprob shapes. | Beta-ready with numeric/distribution caveats. |
 | Packaging | Clean-checkout `MLX_LIB_PATH=/Users/tmc/ml-explore/mlx-go/mlxc/lib LOCALTINKER_QWEN3_8B_MLX_BASE=mlx-community/Qwen3-0.6B-bf16 GOCACHE=$(mktemp -d /tmp/localtinker-gocache.XXXXXX) GOWORK=off go test ./...`; latest recorded pass: `773a4d9`. | Beta-ready; rerun before any release commit. |
 | Secrets and artifacts | Hosted comparison JSONL artifacts use scrubbed runner metadata (`python`, `local-runner`). No keys, binaries, downloaded weights, generated caches, or private model paths should be staged. | Beta-ready; keep scanning before release. |
