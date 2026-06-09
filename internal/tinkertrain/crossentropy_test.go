@@ -78,9 +78,10 @@ func TestDenseCrossEntropyBatchRejectsBadTargetsAndWeights(t *testing.T) {
 		}
 	}
 	tests := []struct {
-		name    string
-		edit    func(*ForwardBackwardInput)
-		wantErr bool
+		name       string
+		edit       func(*ForwardBackwardInput)
+		wantErr    bool
+		wantSigned bool
 	}{
 		{
 			name: "fractional target",
@@ -97,11 +98,14 @@ func TestDenseCrossEntropyBatchRejectsBadTargetsAndWeights(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "negative weight",
+			// A negative cross-entropy weight is the forward_backward_custom
+			// backward signal (weights = -grad); it is accepted and marks the
+			// batch signed (exercised by TestDenseCrossEntropySignedUnnormalized).
+			name: "negative weight accepted for cross_entropy",
 			edit: func(in *ForwardBackwardInput) {
 				in.Data[0].LossFnInputs["weights"] = TensorData{Data: []float64{1, -1}, DType: "float32"}
 			},
-			wantErr: true,
+			wantSigned: true,
 		},
 		{
 			name: "non finite weight",
@@ -136,12 +140,15 @@ func TestDenseCrossEntropyBatchRejectsBadTargetsAndWeights(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			in := base()
 			tt.edit(&in)
-			_, err := newDenseBatch(in)
+			batch, err := newDenseBatch(in)
 			if tt.wantErr && err == nil {
 				t.Fatal("newDenseBatch succeeded, want error")
 			}
 			if !tt.wantErr && err != nil {
 				t.Fatalf("newDenseBatch error = %v, want nil", err)
+			}
+			if !tt.wantErr && batch.weightsSigned != tt.wantSigned {
+				t.Fatalf("batch.weightsSigned = %v, want %v", batch.weightsSigned, tt.wantSigned)
 			}
 		})
 	}
@@ -203,7 +210,7 @@ func TestDenseCrossEntropyReturnsWeightedLossAndLogprobs(t *testing.T) {
 	}
 	defer weights.Free()
 
-	loss, logprobs, err := denseCrossEntropy(logits, targets, weights)
+	loss, logprobs, err := denseCrossEntropy(logits, targets, weights, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,6 +242,55 @@ func TestDenseCrossEntropyReturnsWeightedLossAndLogprobs(t *testing.T) {
 	wantLoss := (-wantLogprobs[0] - 0.5*wantLogprobs[1]) / 1.5
 	if !near(float64(gotLoss), wantLoss) {
 		t.Fatalf("loss = %v, want %v", gotLoss, wantLoss)
+	}
+}
+
+// TestDenseCrossEntropySignedUnnormalized locks the forward_backward_custom
+// surrogate: with a signed weight the loss is the unnormalized sum
+// L = sum(-logprobs*weights), NOT divided by sum(weights). This is what makes
+// dL/dlogprobs = -weights, so a client sending weights = -grad backpropagates an
+// arbitrary custom loss. The same logits/targets yield the existing normalized
+// loss when signed=false (see TestDenseCrossEntropyReturnsWeightedLossAndLogprobs).
+func TestDenseCrossEntropySignedUnnormalized(t *testing.T) {
+	logits, err := mlx.FromSlice([]float32{
+		0, 1, 2,
+		2, 0, -2,
+	}, []int{1, 2, 3}, mlx.Float32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logits.Free()
+	targets, err := mlx.FromSlice([]int32{2, 0}, []int{1, 2}, mlx.Int32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer targets.Free()
+	// A signed weight vector that sums to ~0, as a balanced custom backward does.
+	weights, err := mlx.FromSlice([]float32{0.5, -0.5}, []int{1, 2}, mlx.Float32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer weights.Free()
+
+	loss, logprobs, err := denseCrossEntropy(logits, targets, weights, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer loss.Free()
+	defer logprobs.Free()
+	if err := mlx.Eval(loss, logprobs); err != nil {
+		t.Fatal(err)
+	}
+	gotLoss, err := mlx.ItemAs[float32](loss)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lp0 := 2 - logsumexp(0, 1, 2)
+	lp1 := 2 - logsumexp(2, 0, -2)
+	// Unnormalized: no /sum(weights) (which is 0 here and would divide by zero).
+	wantLoss := -0.5*lp0 + 0.5*lp1
+	if !near(float64(gotLoss), wantLoss) {
+		t.Fatalf("signed loss = %v, want unnormalized %v", gotLoss, wantLoss)
 	}
 }
 
@@ -295,7 +351,7 @@ func TestDenseCrossEntropyFractionalWeights(t *testing.T) {
 		}
 		defer weights.Free()
 
-		loss, logprobs, err := denseCrossEntropy(logits, targets, weights)
+		loss, logprobs, err := denseCrossEntropy(logits, targets, weights, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -371,7 +427,7 @@ func TestDenseCrossEntropyShapeErrors(t *testing.T) {
 	}
 	defer weights.Free()
 
-	loss, logprobs, err := denseCrossEntropy(logits, targets, weights)
+	loss, logprobs, err := denseCrossEntropy(logits, targets, weights, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +442,7 @@ func TestDenseCrossEntropyShapeErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer badTargets.Free()
-	if _, _, err := denseCrossEntropy(logits, badTargets, weights); err == nil {
+	if _, _, err := denseCrossEntropy(logits, badTargets, weights, false); err == nil {
 		t.Fatal("denseCrossEntropy with bad targets succeeded, want error")
 	}
 
@@ -395,7 +451,7 @@ func TestDenseCrossEntropyShapeErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer badWeights.Free()
-	if _, _, err := denseCrossEntropy(logits, targets, badWeights); err == nil {
+	if _, _, err := denseCrossEntropy(logits, targets, badWeights, false); err == nil {
 		t.Fatal("denseCrossEntropy with bad weights succeeded, want error")
 	}
 }

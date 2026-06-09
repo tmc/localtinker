@@ -146,7 +146,11 @@ func (m *mlxModel) forwardBackward(ctx context.Context, input ForwardBackwardInp
 	if err != nil {
 		return ForwardBackwardOutput{}, err
 	}
-	if backward && batch.weightSum == 0 {
+	// A signed-weight batch (forward_backward_custom backward pass) legitimately
+	// sums to ~0 and uses the unnormalized surrogate, so only reject a zero-sum
+	// batch on the all-non-negative path, where it is a degenerate fully-masked
+	// request that would divide by zero.
+	if backward && batch.weightSum == 0 && !batch.weightsSigned {
 		return ForwardBackwardOutput{}, fmt.Errorf("zero total weight")
 	}
 
@@ -579,8 +583,12 @@ type denseBatch struct {
 	rows      []denseRow
 	seqLen    int
 	weightSum float64
-	lossFn    string
-	config    policyLossConfig
+	// weightsSigned is set when any datum carries a negative weight, which only
+	// the SDK's forward_backward_custom backward pass produces (weights = -grad).
+	// It selects the unnormalized cross-entropy surrogate; see denseCrossEntropy.
+	weightsSigned bool
+	lossFn        string
+	config        policyLossConfig
 }
 
 type policyLossConfig struct {
@@ -655,6 +663,9 @@ func newDenseBatch(input ForwardBackwardInput) (denseBatch, error) {
 		for _, w := range weights {
 			if w > 0 {
 				batch.weightSum += float64(w)
+			}
+			if w < 0 {
+				batch.weightsSigned = true
 			}
 		}
 		if len(tokens) > batch.seqLen {
@@ -865,13 +876,16 @@ func (m *mlxModel) evaluateDenseBatch(ctx context.Context, batch denseBatch) (de
 
 	var lossValue float64
 	var logprobs *mlx.Array
-	if batch.weightSum == 0 {
+	if batch.weightSum == 0 && !batch.weightsSigned {
+		// Fully-masked (all-zero non-negative) batch: no loss to compute, just
+		// return logprobs. A signed batch still has a meaningful unnormalized
+		// surrogate loss, so it falls through to the loss path below.
 		logprobs, err = denseLogprobs(logits, targets)
 	} else {
 		var loss *mlx.Array
 		switch batch.lossFn {
 		case "cross_entropy":
-			loss, logprobs, err = denseCrossEntropy(logits, targets, weights)
+			loss, logprobs, err = denseCrossEntropy(logits, targets, weights, batch.weightsSigned)
 		case "importance_sampling", "ppo", "cispo", "dro":
 			loss, logprobs, err = densePolicyLoss(batch.lossFn, logits, targets, weights, oldLogprobs, advantages, batch.config)
 		default:
@@ -945,7 +959,7 @@ func (m *mlxModel) trainDenseStep(ctx context.Context, batch denseBatch, params 
 		defer logits.Free()
 		switch batch.lossFn {
 		case "cross_entropy":
-			loss, _, err := denseCrossEntropy(logits, extraInputs[1], extraInputs[2])
+			loss, _, err := denseCrossEntropy(logits, extraInputs[1], extraInputs[2], batch.weightsSigned)
 			return loss, err
 		case "importance_sampling", "ppo", "cispo", "dro":
 			loss, _, err := densePolicyLoss(batch.lossFn, logits, extraInputs[1], extraInputs[2], extraInputs[3], extraInputs[4], batch.config)
@@ -997,7 +1011,18 @@ func (m *mlxModel) trainDenseStep(ctx context.Context, batch denseBatch, params 
 	return float64(loss32), nil
 }
 
-func denseCrossEntropy(logits, targets, weights *mlx.Array) (loss, logprobs *mlx.Array, err error) {
+// denseCrossEntropy computes the cross-entropy loss. With non-negative weights
+// (standard supervised fine-tuning) it returns the weight-normalized mean
+// L = sum(-logprobs*weights)/sum(weights). When any weight is negative
+// (signed=true) it returns the unnormalized sum L = sum(-logprobs*weights):
+// this is the surrogate the SDK's forward_backward_custom backward pass relies
+// on, sending weights = -dC/dlogprobs so that dL/dlogprobs = -weights chains an
+// arbitrary client-side loss C. Normalizing by sum(weights) there would distort
+// that gradient (and sum(weights) is ~0 for a balanced custom batch), so the
+// signed case must stay unnormalized. A signed weight is the only wire signal
+// distinguishing the two: a custom backward is otherwise indistinguishable from
+// an SFT cross_entropy request.
+func denseCrossEntropy(logits, targets, weights *mlx.Array, signed bool) (loss, logprobs *mlx.Array, err error) {
 	logprobs, err = denseLogprobs(logits, targets)
 	if err != nil {
 		return nil, nil, err
@@ -1017,6 +1042,9 @@ func denseCrossEntropy(logits, targets, weights *mlx.Array) (loss, logprobs *mlx
 	weighted := mlx.Multiply(negLogprobs, weights)
 	defer weighted.Free()
 	total := mlx.Sum(weighted, false)
+	if signed {
+		return total, logprobs, nil
+	}
 	defer total.Free()
 	weightTotal := mlx.Sum(weights, false)
 	defer weightTotal.Free()

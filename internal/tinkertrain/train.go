@@ -412,9 +412,14 @@ func (d Datum) weights(n int) ([]float64, error) {
 	if len(weight.Data) != n {
 		return nil, fmt.Errorf("weights=%d target tokens=%d", len(weight.Data), n)
 	}
+	// Weights must be finite, but may be negative: the SDK's
+	// forward_backward_custom backward pass sends weights = -gradient, which the
+	// cross-entropy surrogate uses unnormalized (see denseCrossEntropy). Loss
+	// functions that require non-negative weights enforce that at the validation
+	// layer (see validateLossDatum).
 	for i, v := range weight.Data {
-		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
-			return nil, fmt.Errorf("weights[%d] = %v is not a non-negative finite number", i, v)
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return nil, fmt.Errorf("weights[%d] = %v is not a finite number", i, v)
 		}
 	}
 	return append([]float64(nil), weight.Data...), nil
