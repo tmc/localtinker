@@ -2,58 +2,49 @@
 
 ## Inputs that control determinism
 
-- Sampler seed. `SamplingParams.Seed` at `internal/tinkertrain/train.go:97`;
-  RNG key constructed and split per token at
-  `internal/tinkertrain/mlx.go:343` and `internal/tinkertrain/mlx.go:350`. A
-  zero seed leaves `key` nil and the underlying sampler is unseeded.
-- Sampler temperature, top-p, top-k. `SamplingParams` at
-  `internal/tinkertrain/train.go:95`; defaults applied at
-  `internal/tinkertrain/mlx.go:421` (temperature=1) and
-  `internal/tinkertrain/mlx.go:426` (top-p=1). Temperature 0 with a fixed
+Symbols below live in `internal/tinkertrain` (`train.go`, `mlx.go`,
+`sample_test.go`); they are named rather than cited by line so the references
+survive refactoring.
+
+- Sampler seed. `SamplingParams.Seed`; the RNG key is constructed and split per
+  token in `sampleToken`. A zero seed leaves the key nil and the underlying
+  sampler is unseeded.
+- Sampler temperature, top-p, top-k. `SamplingParams` fields, with defaults of
+  temperature 1 and top-p 1 applied in `sampleToken`. Temperature 0 with a fixed
   seed is the deterministic configuration used in
-  `internal/tinkertrain/sample_test.go:129`.
-- Base model and MLX resolution. `CreateConfig.BaseModel` at
-  `internal/tinkertrain/train.go:21`; default `Qwen/Qwen3-8B` mapped to
-  `mlx-community/Qwen3-8B-4bit` at `internal/tinkertrain/mlx.go:71` and
-  `internal/tinkertrain/mlx.go:127`.
-- Tokenizer. Loaded from the model bundle path at
-  `internal/tinkertrain/mlx.go:117`. Stop strings are tokenized through it
-  at `internal/tinkertrain/mlx.go:1112`, so tokenizer version affects which
-  sequences trigger `stop`.
-- LoRA adapter config. Rank from `CreateConfig.LoRARank`
-  (`internal/tinkertrain/train.go:22`), default 8 at
-  `internal/tinkertrain/mlx.go:88`; alpha = rank*4, dropout 0, key patterns
-  from `lmtrain.DefaultAdapterKeyPatterns()` at
-  `internal/tinkertrain/mlx.go:92`.
-- Optimizer. AdamW, fixed at `internal/tinkertrain/mlx.go:759`. Caller
-  supplies `AdamParams` (`internal/tinkertrain/train.go:70`): learning rate
-  (default 1e-4 at `internal/tinkertrain/mlx.go:174`), weight decay, grad
-  clip norm. Betas and eps are not plumbed; defaults come from
-  `training.DefaultTrainParameters()` at `internal/tinkertrain/mlx.go:758`.
+  `sample_test.go`.
+- Base model and MLX resolution. `CreateConfig.BaseModel`; the default
+  `Qwen/Qwen3-8B` maps to `mlx-community/Qwen3-8B-4bit`, overridable with
+  `LOCALTINKER_QWEN3_8B_MLX_BASE`.
+- Tokenizer. Loaded from the resolved model bundle path. Stop strings are
+  tokenized through it, so tokenizer version affects which sequences trigger
+  `stop`.
+- LoRA adapter config. Rank from `CreateConfig.LoRARank` (default 8);
+  alpha = rank*4, dropout 0, key patterns from
+  `lmtrain.DefaultAdapterKeyPatterns()`.
+- Optimizer. AdamW. The caller supplies `AdamParams` (learning rate default
+  1e-4, weight decay, grad clip norm); unset learning rate, betas, and eps are
+  filled by `AdamParams.withDefaults`.
 - Data order. No shuffling. Batches are consumed in caller order: each
-  `forward_backward` stores the batch at `internal/tinkertrain/mlx.go:152`
-  and the next `optim_step` consumes exactly that pending batch at
-  `internal/tinkertrain/mlx.go:168`. Within a batch, rows keep input order
-  (`internal/tinkertrain/mlx.go:586`).
-- Loss. Local execution accepts `cross_entropy`, `importance_sampling`,
-  `ppo`, `cispo`, and `dro` (`internal/tinkertrain/mlx.go:596`).
-  `cross_entropy` uses weighted mean reduction at
-  `internal/tinkertrain/mlx.go:988`; policy losses use `logprobs`,
-  `advantages`, weights, and loss-specific config at
-  `internal/tinkertrain/mlx.go:1015`. PPO/CISPO clip thresholds and
-  DRO beta are parsed from `LossFnConfig` at
-  `internal/tinkertrain/mlx.go:658`.
+  `forwardBackward` stores the pending batch and the next `optimStep` consumes
+  exactly that batch. Within a batch, rows keep input order (`newDenseBatch`).
+- Loss. Local execution accepts `cross_entropy`, `importance_sampling`, `ppo`,
+  `cispo`, and `dro` (`newDenseBatch`). `denseCrossEntropy` uses weighted-mean
+  reduction for non-negative weights, and the unnormalized sum
+  `sum(-logprobs*weights)` when any weight is negative — the signed-weight case
+  the SDK uses to backpropagate a `forward_backward_custom` loss. Policy losses
+  use `logprobs`, `advantages`, weights, and loss-specific config; PPO/CISPO clip
+  thresholds and DRO beta are parsed from `LossFnConfig`.
 - MLX backend. Selected at link time via `MLX_LIB_PATH`. Execution flags
-  (`FastSDPA`, `FastRoPE`) set at `internal/tinkertrain/mlx.go:81`.
-- Checkpoint root. `LOCALTINKER_CHECKPOINT_ROOT`
-  (`internal/tinkertrain/mlx.go:1054`) controls where adapter weights and
-  optimizer state are written and loaded.
+  (`FastSDPA`, `FastRoPE`) are set when the model is created.
+- Checkpoint root. `LOCALTINKER_CHECKPOINT_ROOT` controls where adapter weights
+  and optimizer state are written and loaded.
 
 ## Not guaranteed deterministic across
 
 - MLX library versions and Metal driver versions.
-- Hosted Tinker vs localtinker. Hosted numerics differ
-  (`docs/internal/roadmap.md:197`).
+- Hosted Tinker vs localtinker. Hosted numerics differ; see the hosted
+  comparison notes in `docs/internal/conformance.md` and `docs/internal/roadmap.md`.
 - Hardware: Metal GPU vs CPU, and across Apple Silicon generations.
 - Concurrent runs sharing a model: sampling and training take
   `mlxModel.mu`, but interleaved `forward_backward` / `optim_step` from
