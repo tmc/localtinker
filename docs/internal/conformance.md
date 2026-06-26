@@ -346,8 +346,8 @@ server gap):
 ## Upstream Port (SDK window af041ee..0883375, v0.18.2 -> v0.22.6)
 
 Porting the upstream SDK delta into both sides of localtinker. Tracked by the
-in-repo spec `docs/SPEC-port-upstream-af041ee-0883375.md` and change summary
-`docs/UPSTREAM-CHANGES-af041ee-0883375.md`.
+in-repo spec `docs/internal/SPEC-port-upstream-af041ee-0883375.md` and change
+summary `docs/internal/UPSTREAM-CHANGES-af041ee-0883375.md`.
 
 - **ClientConfig flags.** `/api/v1/client/config` now round-trips the full
   upstream `ClientConfigResponse` shape: `proto_write_fwdbwd`,
