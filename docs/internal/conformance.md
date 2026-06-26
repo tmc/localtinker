@@ -405,6 +405,52 @@ in-repo spec `docs/SPEC-port-upstream-af041ee-0883375.md` and change summary
   ships in the Python SDK client is not reimplemented here; the server serves
   both contracts so the Python SDK (or a future Go client) gets the new shape.
 
+### Client-side behaviors not reimplemented
+
+Several upstream changes in this window are retry, concurrency, and auth
+behaviors that live entirely in the Python SDK client. localtinker's `tinker/`
+Go client is thin and has no retry handler, connection-pool semaphore, or
+billing-pause loop, so these have no home here. The server-observable surface —
+the configuration the server resolves and the client reads — is served; the
+client behaviors the configuration gates are documented as out of scope:
+
+- **Sampling retry/stuck/concurrency flags (§10).** `sample_no_retries`,
+  `sample_enable_stuck_detection`, and `sample_max_concurrent_requests` are
+  served on `/api/v1/client/config` (see the ClientConfig entry above). In the
+  Python SDK they configure the sampling `RetryConfig` (bypass retries, disable
+  the progress-timeout stuck check, cap in-flight requests). localtinker's
+  client has no retry handler, so the behaviors are not reimplemented. The
+  coordinator's own `retryMaxAttempts` is future-lease dispatch resilience, not
+  the client sampling retry path.
+- **Billing-pause (§8).** `billing_exception_max_pause_duration_sec` is served.
+  The upstream client sleeps-and-retries on HTTP `402` within that window;
+  localtinker's server never emits `402` and the client has no pause loop, so
+  neither side is exercised.
+- **Session-less REST and project env fallback (§9).** `_skip_session` (a
+  REST-only client that skips session creation under a cross-org weights token)
+  and the `TINKER_PROJECT_ID` env fallback are Python `ServiceClient`
+  constructor behaviors. localtinker's client does not model multi-org weights
+  tokens, so there is nothing to skip.
+- **JWT on-demand refresh (§7).** The server `authToken` route returns an empty
+  `jwt` and `use_jwt` round-trips on `/api/v1/client/config`, so the auth
+  contract is reachable. The on-demand refresh logic (refresh when ≤60s of
+  runway remains, guarded by a lock) is Python client machinery and is dormant
+  because JWT auth is not enabled locally.
+
+### Known gaps for this window
+
+All gaps from the `af041ee..0883375` port, in one place:
+
+- **Proto response.** The server decodes a protobuf `forward_backward` request
+  but replies JSON; the proto response path (`Accept: application/x-protobuf`
+  returning a `ForwardBackwardOutput` proto) is not implemented because nothing
+  in localtinker requests it.
+- **Billing `402` emit.** localtinker's server never emits HTTP `402`, so the
+  client billing-pause path cannot be exercised end to end locally.
+- **Client retry/concurrency/auth behaviors.** The §7–§10 client-side behaviors
+  listed above are not reimplemented in the thin Go client; only the
+  server-resolved configuration is served.
+
 ## Can We Publicize?
 
 Current answer: not yet for a broad public launch. It is close enough for a
