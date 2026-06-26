@@ -82,6 +82,15 @@ type ErrorResponse struct {
 	Message string `json:"message"`
 }
 
+// CheckpointArchiveUrlResponse is the 200 JSON body of the checkpoint archive
+// route. It is the newer of the two archive contracts; the legacy contract is a
+// 302 redirect. The client selects the JSON contract with Accept:
+// application/json.
+type CheckpointArchiveUrlResponse struct {
+	URL     string    `json:"url"`
+	Expires time.Time `json:"expires"`
+}
+
 // AuditLogResponse is the body of GET /api/v1/audit. Entries are sorted by
 // timestamp.
 type AuditLogResponse struct {

@@ -374,6 +374,19 @@ in-repo spec `docs/SPEC-port-upstream-af041ee-0883375.md` and change summary
 - **save_weights overwrite.** Already served from the prior parity window:
   `overwrite` is honored on `save_weights` and `save_weights_for_sampler` with
   no 409-as-success behavior (`TestSaveWeightsHonorsOverwrite`).
+- **Checkpoint archive dual contract.** Upstream migrated the archive route from
+  a `302` redirect to a `200` JSON `CheckpointArchiveUrlResponse{url, expires}`,
+  with both contracts coexisting during the migration: the newer client sends
+  `Accept: application/json` and gets the JSON body, a legacy client gets the
+  `302`. localtinker now serves both — `Accept: application/json` returns the
+  JSON body (with the same owner/visibility/expiry metadata), otherwise the
+  legacy `302` redirect is preserved. Pinned by
+  `internal/tinkerhttp.TestCheckpointArchiveContentNegotiation`; the `302`
+  contract stays pinned by `TestCheckpointActionsTrackMetadata` and
+  `TestCheckpointArchiveAuthorization`. Client gap: the Go client (`tinker/`)
+  has no archive-URL fetch method, so the dual-accept handling that upstream
+  ships in the Python SDK client is not reimplemented here; the server serves
+  both contracts so the Python SDK (or a future Go client) gets the new shape.
 
 ## Can We Publicize?
 

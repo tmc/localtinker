@@ -1357,6 +1357,18 @@ func (s *Server) checkpointAction(w http.ResponseWriter, r *http.Request, path s
 			http.ServeFile(w, r, file)
 			return true
 		}
+		// Upstream migrated this route from a 302 redirect to a 200 JSON
+		// response. Both contracts coexist during the migration: the newer
+		// client sends Accept: application/json and gets the JSON body, while a
+		// legacy client gets the 302 redirect. Serve whichever the caller asks
+		// for so either client works against localtinker.
+		if acceptsJSON(r) {
+			writeJSON(w, http.StatusOK, CheckpointArchiveUrlResponse{
+				URL:     archiveDownloadURL(r),
+				Expires: expires,
+			})
+			return true
+		}
 		w.Header().Set("Location", archiveDownloadURL(r))
 		w.WriteHeader(http.StatusFound)
 	case r.Method == http.MethodDelete && action == "":
@@ -1396,6 +1408,20 @@ func (s *Server) checkpointAction(w http.ResponseWriter, r *http.Request, path s
 		writeError(w, http.StatusNotFound, "not_found", "unsupported checkpoint route")
 	}
 	return true
+}
+
+// acceptsJSON reports whether the request explicitly prefers an
+// application/json response. The upstream checkpoint-archive client sets
+// Accept: application/json to select the 200 JSON contract; any other value
+// (including the default */* or a legacy application/gzip) keeps the 302
+// redirect.
+func acceptsJSON(r *http.Request) bool {
+	for _, part := range strings.Split(r.Header.Get("Accept"), ",") {
+		if mediaType, _, _ := strings.Cut(part, ";"); strings.TrimSpace(mediaType) == "application/json" {
+			return true
+		}
+	}
+	return false
 }
 
 func archiveDownloadURL(r *http.Request) string {

@@ -1524,6 +1524,68 @@ func TestCheckpointActionsTrackMetadata(t *testing.T) {
 	}
 }
 
+// TestCheckpointArchiveContentNegotiation pins the newer 200 JSON archive
+// contract that coexists with the legacy 302 redirect. A client that sends
+// Accept: application/json gets CheckpointArchiveUrlResponse; any other client
+// still gets the 302.
+func TestCheckpointArchiveContentNegotiation(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LOCALTINKER_CHECKPOINT_ROOT", root)
+	if err := os.MkdirAll(filepath.Join(root, "model-a", "weights", "ckpt"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "model-a", "weights", "ckpt", "adapters.safetensors"), []byte("weights"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CompleteFuture(nil, map[string]any{
+		"type": "save_weights",
+		"path": "tinker://model-a/weights/ckpt",
+	}, map[string]any{
+		"type":     "save_weights",
+		"model_id": "model-a",
+		"path":     "tinker://model-a/weights/ckpt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+	base := "/api/v1/training_runs/model-a/checkpoints/weights/ckpt"
+
+	// Accept: application/json selects the 200 JSON contract.
+	req := httptest.NewRequest(http.MethodGet, base+"/archive", nil)
+	req.Header.Set("Accept", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("json archive status = %d, want %d body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp CheckpointArchiveUrlResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode archive json: %v", err)
+	}
+	u, err := url.Parse(resp.URL)
+	if err != nil {
+		t.Fatalf("archive url %q: %v", resp.URL, err)
+	}
+	if u.Query().Get("download") != "1" {
+		t.Fatalf("archive url = %q, want a download URL", resp.URL)
+	}
+	if resp.Expires.IsZero() {
+		t.Fatal("archive json missing expires")
+	}
+
+	// Without the JSON Accept header the legacy 302 redirect is preserved.
+	req = httptest.NewRequest(http.MethodGet, base+"/archive", nil)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("default archive status = %d, want %d", rec.Code, http.StatusFound)
+	}
+}
+
 // TestCheckpointArchiveAuthorization pins the checkpoint archive
 // authorization headers and Location URL schema across visibility
 // transitions. Hosted Tinker exposes signed download URLs; localtinker
