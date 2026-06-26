@@ -3,15 +3,23 @@ package tinkerhttp
 import "encoding/json"
 
 type ConfigResponse struct {
-	PJWTAuthEnabled                    bool           `json:"pjwt_auth_enabled"`
-	CredentialDefaultSource            string         `json:"credential_default_source"`
-	SampleDispatchBytesSemaphoreSize   int            `json:"sample_dispatch_bytes_semaphore_size"`
-	InflightResponseBytesSemaphoreSize int            `json:"inflight_response_bytes_semaphore_size"`
-	UseJWT                             bool           `json:"use_jwt"`
-	Auth                               map[string]any `json:"auth"`
-	ParallelFWDBWDChunks               bool           `json:"parallel_fwdbwd_chunks"`
-	MaxRequestBytes                    int            `json:"max_request_bytes"`
-	Features                           map[string]any `json:"features"`
+	PJWTAuthEnabled                     bool           `json:"pjwt_auth_enabled"`
+	CredentialDefaultSource             string         `json:"credential_default_source"`
+	SampleDispatchBytesSemaphoreSize    int            `json:"sample_dispatch_bytes_semaphore_size"`
+	InflightResponseBytesSemaphoreSize  int            `json:"inflight_response_bytes_semaphore_size"`
+	UseJWT                              bool           `json:"use_jwt"`
+	Auth                                map[string]any `json:"auth"`
+	ParallelFWDBWDChunks                bool           `json:"parallel_fwdbwd_chunks"`
+	ProtoWriteFWDBWD                    bool           `json:"proto_write_fwdbwd"`
+	ProtoCompressFWDBWD                 bool           `json:"proto_compress_fwdbwd"`
+	FwdViaFWDBWD                        bool           `json:"fwd_via_fwdbwd"`
+	SampleNoRetries                     bool           `json:"sample_no_retries"`
+	SampleEnableStuckDetection          bool           `json:"sample_enable_stuck_detection"`
+	SampleMaxConcurrentRequests         int            `json:"sample_max_concurrent_requests"`
+	BillingExceptionMaxPauseDurationSec int            `json:"billing_exception_max_pause_duration_sec"`
+	UsePyqwestTransport                 bool           `json:"use_pyqwest_transport"`
+	MaxRequestBytes                     int            `json:"max_request_bytes"`
+	Features                            map[string]any `json:"features"`
 }
 
 type CreateSessionResponse struct {

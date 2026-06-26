@@ -67,9 +67,20 @@ type Session struct {
 }
 
 type ClientConfig struct {
-	UseJWT               bool `json:"use_jwt"`
-	ParallelFWDBWDChunks bool `json:"parallel_fwdbwd_chunks"`
-	MaxRequestBytes      int  `json:"max_request_bytes"`
+	UseJWT                              bool `json:"use_jwt"`
+	ParallelFWDBWDChunks                bool `json:"parallel_fwdbwd_chunks"`
+	ProtoWriteFWDBWD                    bool `json:"proto_write_fwdbwd"`
+	ProtoCompressFWDBWD                 bool `json:"proto_compress_fwdbwd"`
+	FwdViaFWDBWD                        bool `json:"fwd_via_fwdbwd"`
+	SampleNoRetries                     bool `json:"sample_no_retries"`
+	SampleEnableStuckDetection          bool `json:"sample_enable_stuck_detection"`
+	SampleMaxConcurrentRequests         int  `json:"sample_max_concurrent_requests"`
+	BillingExceptionMaxPauseDurationSec int  `json:"billing_exception_max_pause_duration_sec"`
+	// UsePyqwestTransport is accepted for wire parity only; localtinker's
+	// client uses net/http and ignores it (upstream's pyqwest transport is a
+	// Python httpx workaround).
+	UsePyqwestTransport bool `json:"use_pyqwest_transport"`
+	MaxRequestBytes     int  `json:"max_request_bytes"`
 }
 
 type Capability struct {
@@ -340,9 +351,17 @@ func (c *Coordinator) RequeueFutureLease(ctx context.Context, id, leaseID, reaso
 
 func (c *Coordinator) ClientConfig(_ context.Context) ClientConfig {
 	return ClientConfig{
-		UseJWT:               false,
-		ParallelFWDBWDChunks: false,
-		MaxRequestBytes:      c.maxRequestBytes,
+		UseJWT:                              false,
+		ParallelFWDBWDChunks:                true,
+		ProtoWriteFWDBWD:                    false,
+		ProtoCompressFWDBWD:                 false,
+		FwdViaFWDBWD:                        false,
+		SampleNoRetries:                     false,
+		SampleEnableStuckDetection:          true,
+		SampleMaxConcurrentRequests:         2000,
+		BillingExceptionMaxPauseDurationSec: 3600,
+		UsePyqwestTransport:                 true,
+		MaxRequestBytes:                     c.maxRequestBytes,
 	}
 }
 

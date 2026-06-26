@@ -84,13 +84,21 @@ func limitsRequestBody(r *http.Request) bool {
 func (s *Server) clientConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := s.coord.ClientConfig(r.Context())
 	writeJSON(w, http.StatusOK, ConfigResponse{
-		PJWTAuthEnabled:                    false,
-		CredentialDefaultSource:            "api_key",
-		SampleDispatchBytesSemaphoreSize:   cfg.MaxRequestBytes,
-		InflightResponseBytesSemaphoreSize: cfg.MaxRequestBytes,
-		UseJWT:                             cfg.UseJWT,
-		ParallelFWDBWDChunks:               cfg.ParallelFWDBWDChunks,
-		MaxRequestBytes:                    cfg.MaxRequestBytes,
+		PJWTAuthEnabled:                     false,
+		CredentialDefaultSource:             "api_key",
+		SampleDispatchBytesSemaphoreSize:    cfg.MaxRequestBytes,
+		InflightResponseBytesSemaphoreSize:  cfg.MaxRequestBytes,
+		UseJWT:                              cfg.UseJWT,
+		ParallelFWDBWDChunks:                cfg.ParallelFWDBWDChunks,
+		ProtoWriteFWDBWD:                    cfg.ProtoWriteFWDBWD,
+		ProtoCompressFWDBWD:                 cfg.ProtoCompressFWDBWD,
+		FwdViaFWDBWD:                        cfg.FwdViaFWDBWD,
+		SampleNoRetries:                     cfg.SampleNoRetries,
+		SampleEnableStuckDetection:          cfg.SampleEnableStuckDetection,
+		SampleMaxConcurrentRequests:         cfg.SampleMaxConcurrentRequests,
+		BillingExceptionMaxPauseDurationSec: cfg.BillingExceptionMaxPauseDurationSec,
+		UsePyqwestTransport:                 cfg.UsePyqwestTransport,
+		MaxRequestBytes:                     cfg.MaxRequestBytes,
 		Auth: map[string]any{
 			"use_jwt": cfg.UseJWT,
 			"mode":    "none",

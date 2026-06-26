@@ -32,8 +32,20 @@ func TestHandshakeRoutes(t *testing.T) {
 	if cfg.UseJWT {
 		t.Fatal("UseJWT = true, want false")
 	}
-	if cfg.ParallelFWDBWDChunks {
-		t.Fatal("ParallelFWDBWDChunks = true, want false")
+	if !cfg.ParallelFWDBWDChunks {
+		t.Fatal("ParallelFWDBWDChunks = false, want true")
+	}
+	if !cfg.SampleEnableStuckDetection {
+		t.Fatal("SampleEnableStuckDetection = false, want true")
+	}
+	if cfg.SampleMaxConcurrentRequests != 2000 {
+		t.Fatalf("SampleMaxConcurrentRequests = %d, want 2000", cfg.SampleMaxConcurrentRequests)
+	}
+	if cfg.BillingExceptionMaxPauseDurationSec != 3600 {
+		t.Fatalf("BillingExceptionMaxPauseDurationSec = %d, want 3600", cfg.BillingExceptionMaxPauseDurationSec)
+	}
+	if !cfg.UsePyqwestTransport {
+		t.Fatal("UsePyqwestTransport = false, want true")
 	}
 
 	var created CreateSessionResponse
