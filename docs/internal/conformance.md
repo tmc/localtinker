@@ -343,6 +343,38 @@ server gap):
   the Google Gemini embedding API, and `harbor_rl` requires a Modal cloud Docker
   sandbox and an externally populated task cache.
 
+## Upstream Port (SDK window af041ee..0883375, v0.18.2 -> v0.22.6)
+
+Porting the upstream SDK delta into both sides of localtinker. Tracked by the
+in-repo spec `docs/SPEC-port-upstream-af041ee-0883375.md` and change summary
+`docs/UPSTREAM-CHANGES-af041ee-0883375.md`.
+
+- **ClientConfig flags.** `/api/v1/client/config` now round-trips the full
+  upstream `ClientConfigResponse` shape: `proto_write_fwdbwd`,
+  `proto_compress_fwdbwd`, `fwd_via_fwdbwd`, `sample_no_retries`,
+  `sample_enable_stuck_detection`, `sample_max_concurrent_requests` (2000),
+  `billing_exception_max_pause_duration_sec` (3600), and
+  `use_pyqwest_transport` (accepted for parity, ignored: the Go client uses
+  `net/http`). `parallel_fwdbwd_chunks` defaults to `true` to match upstream.
+  The proto and sampling behaviors these flags gate are not yet implemented.
+- **Audit log.** `GET /api/v1/audit?event_type=all|checkpoints&day=YYYY-MM-DD`
+  returns `AuditLogResponse{entries:[AuditLogEntry]}` derived from saved
+  checkpoints within the requested midnight-to-midnight UTC window. Upstream
+  restricts this to the `tinker-admin` role; localtinker does not model RBAC, so
+  authorization is **permissive (always allowed)** and the policy gap is noted
+  in the handler. Pinned by `internal/tinkerhttp.TestAuditLog`.
+- **Assign session project.** `PUT /api/v1/sessions/{id}/project` validates
+  `{project_id}` and the session, then returns an empty 200 (upstream casts the
+  response to `None`). localtinker does not model projects, so the assignment is
+  a no-op. Pinned by `internal/tinkerhttp.TestAssignSessionProject`.
+- **List training runs project filter.** `GET /api/v1/training_runs` accepts an
+  optional `project_id` query param for wire parity; because no run belongs to a
+  project, a non-empty `project_id` returns an empty page. Pinned by
+  `internal/tinkerhttp.TestTrainingRunsProjectFilter`.
+- **save_weights overwrite.** Already served from the prior parity window:
+  `overwrite` is honored on `save_weights` and `save_weights_for_sampler` with
+  no 409-as-success behavior (`TestSaveWeightsHonorsOverwrite`).
+
 ## Can We Publicize?
 
 Current answer: not yet for a broad public launch. It is close enough for a

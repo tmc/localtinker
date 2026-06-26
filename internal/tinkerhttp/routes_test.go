@@ -1898,3 +1898,76 @@ func retrieveOK(t *testing.T, h http.Handler, requestID string) map[string]any {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestAuditLog(t *testing.T) {
+	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+
+	// An empty store yields no entries but still the documented shape.
+	var resp AuditLogResponse
+	getJSON(t, h, "/api/v1/audit", &resp)
+	if resp.Entries == nil {
+		t.Fatal("entries = nil, want empty slice")
+	}
+	if len(resp.Entries) != 0 {
+		t.Fatalf("entries = %d, want 0", len(resp.Entries))
+	}
+
+	// event_type and day are validated.
+	var errResp map[string]string
+	methodJSON(t, h, http.MethodGet, "/api/v1/audit?event_type=bogus", nil, http.StatusBadRequest, &errResp)
+	methodJSON(t, h, http.MethodGet, "/api/v1/audit?day=2026-13-99", nil, http.StatusBadRequest, &errResp)
+	methodJSON(t, h, http.MethodGet, "/api/v1/audit?event_type=checkpoints&day=2026-06-26", nil, http.StatusOK, &resp)
+}
+
+func TestAssignSessionProject(t *testing.T) {
+	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+
+	var created CreateSessionResponse
+	postJSON(t, h, "/api/v1/create_session", nil, &created)
+	if created.SessionID == "" {
+		t.Fatal("empty session_id")
+	}
+
+	// localtinker does not model projects, so the assignment succeeds as a no-op.
+	// Upstream casts the response to None, so the body is empty.
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/sessions/"+created.SessionID+"/project",
+		strings.NewReader(`{"project_id":"proj-1"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("assign project status = %d, want 200 body = %s", rec.Code, rec.Body.String())
+	}
+
+	// Missing project_id is a user error; unknown session is not found.
+	var errResp map[string]string
+	methodJSON(t, h, http.MethodPut, "/api/v1/sessions/"+created.SessionID+"/project",
+		map[string]any{}, http.StatusBadRequest, &errResp)
+	methodJSON(t, h, http.MethodPut, "/api/v1/sessions/does-not-exist/project",
+		map[string]any{"project_id": "proj-1"}, http.StatusNotFound, &errResp)
+}
+
+func TestTrainingRunsProjectFilter(t *testing.T) {
+	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+
+	// No project models any run, so a project_id filter returns an empty page.
+	var resp tinkercoord.TrainingRunsResponse
+	getJSON(t, h, "/api/v1/training_runs?project_id=proj-1", &resp)
+	if len(resp.TrainingRuns) != 0 {
+		t.Fatalf("filtered training_runs = %d, want 0", len(resp.TrainingRuns))
+	}
+	if resp.Cursor.TotalCount != 0 {
+		t.Fatalf("filtered total_count = %d, want 0", resp.Cursor.TotalCount)
+	}
+}

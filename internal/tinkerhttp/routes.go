@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -53,8 +54,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/weights_info", s.weightsInfo)
 	mux.HandleFunc("GET /api/v1/training_runs", s.trainingRuns)
 	mux.HandleFunc("GET /api/v1/checkpoints", s.checkpoints)
+	mux.HandleFunc("GET /api/v1/audit", s.auditLog)
 	mux.HandleFunc("GET /api/v1/sessions", s.sessions)
 	mux.HandleFunc("GET /api/v1/sessions/", s.sessionPath)
+	mux.HandleFunc("PUT /api/v1/sessions/", s.sessionPath)
 	mux.HandleFunc("GET /api/v1/samplers/", s.samplerPath)
 	mux.HandleFunc("GET /api/v1/training_runs/", s.trainingRunPath)
 	mux.HandleFunc("POST /api/v1/training_runs/", s.trainingRunPath)
@@ -1060,6 +1063,13 @@ func (s *Server) trainingRuns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "system_error", err.Error())
 		return
 	}
+	// localtinker does not model projects, so a project_id filter can never
+	// match a run. Accept the upstream query param for wire parity and return
+	// an empty page when it is set.
+	if r.URL.Query().Get("project_id") != "" {
+		resp.TrainingRuns = nil
+		resp.Cursor.TotalCount = 0
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1109,7 +1119,12 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) sessionPath(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/api/v1/sessions/")
+	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/sessions/")
+	if r.Method == http.MethodPut {
+		s.assignSessionProject(w, r, rest)
+		return
+	}
+	id := rest
 	if id == "" || strings.Contains(id, "/") {
 		writeError(w, http.StatusNotFound, "not_found", "unknown session")
 		return
@@ -1140,6 +1155,96 @@ func (s *Server) sessionPath(w http.ResponseWriter, r *http.Request) {
 		"training_run_ids": modelIDs,
 		"sampler_ids":      []string{},
 	})
+}
+
+// assignSessionProject handles PUT /api/v1/sessions/{id}/project. Upstream moves
+// the session (and its runs and samplers) into a project; localtinker does not
+// model projects, so this validates the request and returns success without
+// changing any state. The session must exist.
+func (s *Server) assignSessionProject(w http.ResponseWriter, r *http.Request, rest string) {
+	id, suffix, ok := strings.Cut(rest, "/")
+	if !ok || suffix != "project" || id == "" {
+		writeError(w, http.StatusNotFound, "not_found", "unsupported session route")
+		return
+	}
+	var req struct {
+		ProjectID string `json:"project_id"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeUserError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.ProjectID == "" {
+		writeUserError(w, http.StatusBadRequest, "project_id is required")
+		return
+	}
+	snapshot, err := s.coord.DashboardSnapshot(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "system_error", err.Error())
+		return
+	}
+	found := false
+	for _, session := range snapshot.Sessions {
+		if session.ID == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "not_found", "unknown session")
+		return
+	}
+	// Accepted: localtinker has no projects, so the assignment is a no-op.
+	w.WriteHeader(http.StatusOK)
+}
+
+// auditLog handles GET /api/v1/audit. Upstream restricts this to the
+// tinker-admin role; localtinker does not model RBAC, so authorization is
+// permissive (always allowed). Entries are derived from saved checkpoints
+// within the requested UTC day window.
+func (s *Server) auditLog(w http.ResponseWriter, r *http.Request) {
+	eventType := r.URL.Query().Get("event_type")
+	if eventType == "" {
+		eventType = "all"
+	}
+	if eventType != "all" && eventType != "checkpoints" {
+		writeUserError(w, http.StatusBadRequest, "event_type must be all or checkpoints")
+		return
+	}
+	day := time.Now().UTC()
+	if raw := r.URL.Query().Get("day"); raw != "" {
+		parsed, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			writeUserError(w, http.StatusBadRequest, "day must be formatted YYYY-MM-DD")
+			return
+		}
+		day = parsed.UTC()
+	}
+	start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 0, 1)
+
+	resp, err := s.coord.Checkpoints(r.Context(), "", 0, 0)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "system_error", err.Error())
+		return
+	}
+	entries := make([]AuditLogEntry, 0, len(resp.Checkpoints))
+	for _, ckpt := range resp.Checkpoints {
+		t := ckpt.Time.UTC()
+		if t.Before(start) || !t.Before(end) {
+			continue
+		}
+		entries = append(entries, AuditLogEntry{
+			Timestamp:  t,
+			Event:      "checkpoint_saved",
+			TinkerPath: ckpt.TinkerPath,
+			Purpose:    ckpt.CheckpointType,
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Timestamp.Before(entries[j].Timestamp)
+	})
+	writeJSON(w, http.StatusOK, AuditLogResponse{Entries: entries})
 }
 
 func (s *Server) samplerPath(w http.ResponseWriter, r *http.Request) {

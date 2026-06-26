@@ -1,6 +1,9 @@
 package tinkerhttp
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 type ConfigResponse struct {
 	PJWTAuthEnabled                     bool           `json:"pjwt_auth_enabled"`
@@ -77,4 +80,19 @@ type ErrorResponse struct {
 	Status  string `json:"status"`
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+// AuditLogResponse is the body of GET /api/v1/audit. Entries are sorted by
+// timestamp.
+type AuditLogResponse struct {
+	Entries []AuditLogEntry `json:"entries"`
+}
+
+// AuditLogEntry is one event in the audit log.
+type AuditLogEntry struct {
+	Timestamp  time.Time `json:"timestamp"`
+	Event      string    `json:"event"`
+	ModelID    string    `json:"model_id,omitempty"`
+	TinkerPath string    `json:"tinker_path,omitempty"`
+	Purpose    string    `json:"purpose,omitempty"`
 }
