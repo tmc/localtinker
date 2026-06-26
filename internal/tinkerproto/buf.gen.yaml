@@ -1,3 +1,13 @@
+# Generate with: buf generate proto
+#
+# The .proto files declare go_package github.com/tmc/mlx-go/..., so generated
+# .connect.go files import that path. This module is github.com/tmc/localtinker,
+# so the committed tinkerv1/tinkerv1connect/*.connect.go files are post-gen
+# patched to the localtinker import path. buf generate reverts that patch every
+# run; after generating, restore the connect files with:
+#   git checkout -- tinkerv1/tinkerv1connect/
+# The .pb.go files keep the mlx-go go_package descriptor string (harmless) and
+# need no patch.
 version: v2
 plugins:
   - local: protoc-gen-go

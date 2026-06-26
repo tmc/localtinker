@@ -15,7 +15,9 @@ import (
 
 	"github.com/tmc/localtinker/internal/tinkercoord"
 	"github.com/tmc/localtinker/internal/tinkerdb"
+	"github.com/tmc/localtinker/internal/tinkerproto/tinkerv1"
 	"github.com/tmc/localtinker/internal/tinkertrain"
+	"google.golang.org/protobuf/proto"
 )
 
 type Server struct {
@@ -290,6 +292,10 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) forwardBackward(w http.ResponseWriter, r *http.Request) {
+	if isProtoContent(r) {
+		s.forwardBackwardProto(w, r)
+		return
+	}
 	var req trainingRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
@@ -317,6 +323,55 @@ func (s *Server) forwardBackward(w http.ResponseWriter, r *http.Request) {
 		RequestID: future.ID,
 		ID:        future.ID,
 		ModelID:   req.ModelID,
+	})
+}
+
+// forwardBackwardProto handles a forward_backward request whose body is a
+// protobuf ForwardBackwardRequest (Content-Type: application/x-protobuf),
+// optionally zstd-compressed (Content-Encoding: zstd). The decoded request runs
+// through the same training path as the JSON branch. forward_only routes to the
+// forward-only path. The response is still JSON (the proto response path is a
+// known gap; see the conformance notes).
+func (s *Server) forwardBackwardProto(w http.ResponseWriter, r *http.Request) {
+	body, err := readMaybeCompressed(r)
+	if err != nil {
+		writeUserError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var msg tinkerv1.ForwardBackwardRequest
+	if err := proto.Unmarshal(body, &msg); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("decode protobuf: %v", err))
+		return
+	}
+	modelID, input, forwardOnly, err := decodeForwardBackwardProto(&msg)
+	if err != nil {
+		writeUserError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if modelID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "missing model_id")
+		return
+	}
+	if err := normalizeAndValidateInput(&input); err != nil {
+		writeUserError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	req := tinkertrain.Request{ModelID: modelID, Input: input}
+	var future tinkercoord.Future
+	if forwardOnly {
+		future, err = s.coord.Forward(r.Context(), req)
+	} else {
+		future, err = s.coord.ForwardBackward(r.Context(), req)
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "system_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, FutureResponse{
+		FutureID:  future.ID,
+		RequestID: future.ID,
+		ID:        future.ID,
+		ModelID:   modelID,
 	})
 }
 

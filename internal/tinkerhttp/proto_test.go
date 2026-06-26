@@ -1,0 +1,241 @@
+package tinkerhttp
+
+import (
+	"bytes"
+	"encoding/binary"
+	"encoding/json"
+	"math"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"testing"
+
+	"github.com/klauspost/compress/zstd"
+	"github.com/tmc/localtinker/internal/tinkercoord"
+	"github.com/tmc/localtinker/internal/tinkerdb"
+	"github.com/tmc/localtinker/internal/tinkerproto/tinkerv1"
+	"github.com/tmc/localtinker/internal/tinkertrain"
+	"google.golang.org/protobuf/proto"
+)
+
+func float32Bytes(vals ...float32) []byte {
+	b := make([]byte, 4*len(vals))
+	for i, v := range vals {
+		binary.LittleEndian.PutUint32(b[i*4:], math.Float32bits(v))
+	}
+	return b
+}
+
+func int64Bytes(vals ...int64) []byte {
+	b := make([]byte, 8*len(vals))
+	for i, v := range vals {
+		binary.LittleEndian.PutUint64(b[i*8:], uint64(v))
+	}
+	return b
+}
+
+func int32Bytes(vals ...int32) []byte {
+	b := make([]byte, 4*len(vals))
+	for i, v := range vals {
+		binary.LittleEndian.PutUint32(b[i*4:], uint32(v))
+	}
+	return b
+}
+
+// TestDecodeForwardBackwardProtoParity proves a proto ForwardBackwardRequest
+// decodes into the same ForwardBackwardInput the JSON path builds, so the proto
+// branch runs the existing training path unchanged.
+func TestDecodeForwardBackwardProtoParity(t *testing.T) {
+	msg := &tinkerv1.ForwardBackwardRequest{
+		ModelId: "model-a",
+		SeqId:   1,
+		LossFn:  "cross_entropy",
+		Data: []*tinkerv1.Datum{{
+			ModelInput: []*tinkerv1.Chunk{{
+				Chunk: &tinkerv1.Chunk_EncodedText{
+					EncodedText: &tinkerv1.EncodedTextChunk{Tokens: int32Bytes(1, 2, 3, 4)},
+				},
+			}},
+			LossFnInputs: map[string]*tinkerv1.Tensor{
+				"target_tokens": {
+					Encoding: &tinkerv1.Tensor_Dense{Dense: int64Bytes(9, 8, 7, 6)},
+					Dtype:    tinkerv1.DType_DTYPE_INT64,
+					Shape:    []int64{2, 2},
+				},
+				"weights": {
+					Encoding: &tinkerv1.Tensor_Dense{Dense: float32Bytes(1, 0.5, 0, 1)},
+					Dtype:    tinkerv1.DType_DTYPE_FLOAT32,
+					Shape:    []int64{2, 2},
+				},
+			},
+		}},
+	}
+
+	modelID, got, forwardOnly, err := decodeForwardBackwardProto(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modelID != "model-a" {
+		t.Fatalf("model_id = %q, want model-a", modelID)
+	}
+	if forwardOnly {
+		t.Fatal("forward_only = true, want false")
+	}
+
+	want := tinkertrain.ForwardBackwardInput{
+		LossFn: "cross_entropy",
+		Data: []tinkertrain.Datum{{
+			ModelInput: tinkertrain.ModelInput{Chunks: []tinkertrain.ModelInputChunk{{
+				Type:   "encoded_text",
+				Tokens: []int{1, 2, 3, 4},
+			}}},
+			LossFnInputs: map[string]tinkertrain.TensorData{
+				"target_tokens": {Data: []float64{9, 8, 7, 6}, DType: "int64", Shape: []int{2, 2}},
+				"weights":       {Data: []float64{1, 0.5, 0, 1}, DType: "float32", Shape: []int{2, 2}},
+			},
+		}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("decoded input mismatch:\n got = %#v\nwant = %#v", got, want)
+	}
+
+	// The decoded input passes the same validation as the JSON path.
+	if err := normalizeAndValidateInput(&got); err != nil {
+		t.Fatalf("decoded input failed validation: %v", err)
+	}
+}
+
+// TestDecodeProtoBFloat16Widening locks the bfloat16 -> float32 widening: a
+// bfloat16 value is the upper 16 bits of its float32 bit pattern.
+func TestDecodeProtoBFloat16Widening(t *testing.T) {
+	// 1.5f is 0x3FC00000; its bfloat16 form is the upper half 0x3FC0.
+	bf16 := []byte{0xC0, 0x3F} // little-endian uint16 0x3FC0
+	got, err := bytesToFloat64s(bf16, tinkerv1.DType_DTYPE_BFLOAT16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != 1.5 {
+		t.Fatalf("bfloat16 widen = %v, want [1.5]", got)
+	}
+}
+
+// TestDecodeProtoSparseCsr locks the CSR decode: values become float64, crow and
+// col indices stay as int slices.
+func TestDecodeProtoSparseCsr(t *testing.T) {
+	tensor := &tinkerv1.Tensor{
+		Encoding: &tinkerv1.Tensor_SparseCsr{SparseCsr: &tinkerv1.SparseCsr{
+			Values:      float32Bytes(2.5, -1.0),
+			CrowIndices: int64Bytes(0, 1, 2),
+			ColIndices:  int64Bytes(0, 1),
+		}},
+		Dtype: tinkerv1.DType_DTYPE_FLOAT32,
+		Shape: []int64{2, 2},
+	}
+	got, err := protoTensor(tensor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := tinkertrain.TensorData{
+		Data:              []float64{2.5, -1.0},
+		DType:             "float32",
+		Shape:             []int{2, 2},
+		SparseCrowIndices: []int{0, 1, 2},
+		SparseColIndices:  []int{0, 1},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("csr decode mismatch:\n got = %#v\nwant = %#v", got, want)
+	}
+}
+
+// TestForwardBackwardProtoRoute submits a protobuf forward_backward request over
+// HTTP, plain and zstd-compressed, and checks the server accepts both and
+// creates a future.
+func TestForwardBackwardProtoRoute(t *testing.T) {
+	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+
+	var created CreateSessionResponse
+	postJSON(t, h, "/api/v1/create_session", nil, &created)
+	var model map[string]any
+	postJSON(t, h, "/api/v1/create_model",
+		map[string]any{"session_id": created.SessionID, "base_model": "Qwen/Qwen3-8B", "lora_config": map[string]any{"rank": 8}},
+		&model)
+	modelID, _ := model["model_id"].(string)
+	if modelID == "" {
+		t.Fatalf("create_model response = %#v", model)
+	}
+
+	msg := &tinkerv1.ForwardBackwardRequest{
+		ModelId: modelID,
+		SeqId:   1,
+		LossFn:  "cross_entropy",
+		Data: []*tinkerv1.Datum{{
+			ModelInput: []*tinkerv1.Chunk{{
+				Chunk: &tinkerv1.Chunk_EncodedText{
+					EncodedText: &tinkerv1.EncodedTextChunk{Tokens: int32Bytes(1, 2, 3, 4)},
+				},
+			}},
+			LossFnInputs: map[string]*tinkerv1.Tensor{
+				"target_tokens": {
+					Encoding: &tinkerv1.Tensor_Dense{Dense: int64Bytes(9, 8, 7, 6)},
+					Dtype:    tinkerv1.DType_DTYPE_INT64,
+					Shape:    []int64{2, 2},
+				},
+				"weights": {
+					Encoding: &tinkerv1.Tensor_Dense{Dense: float32Bytes(1, 0.5, 0, 1)},
+					Dtype:    tinkerv1.DType_DTYPE_FLOAT32,
+					Shape:    []int64{2, 2},
+				},
+			},
+		}},
+	}
+	body, err := proto.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Plain proto body.
+	var future FutureResponse
+	postProto(t, h, body, "", &future)
+	if future.RequestID == "" {
+		t.Fatalf("proto forward_backward returned no future: %#v", future)
+	}
+
+	// zstd-compressed proto body.
+	var compressed bytes.Buffer
+	enc, err := zstd.NewWriter(&compressed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := enc.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := enc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var future2 FutureResponse
+	postProto(t, h, compressed.Bytes(), "zstd", &future2)
+	if future2.RequestID == "" {
+		t.Fatalf("zstd proto forward_backward returned no future: %#v", future2)
+	}
+}
+
+func postProto(t *testing.T, h http.Handler, body []byte, encoding string, out any) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/forward_backward", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-protobuf")
+	if encoding != "" {
+		req.Header.Set("Content-Encoding", encoding)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("proto forward_backward status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if err := json.NewDecoder(rec.Body).Decode(out); err != nil {
+		t.Fatalf("decode proto forward_backward response: %v", err)
+	}
+}

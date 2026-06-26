@@ -4,6 +4,7 @@ go 1.26
 
 require (
 	connectrpc.com/connect v1.19.2
+	github.com/klauspost/compress v1.18.6
 	github.com/tmc/apple v0.5.5
 	github.com/tmc/mlx-go v0.0.0-20260430055908-2a38bf0f0098
 	github.com/tmc/mlx-go-lm v0.0.0-20260430055726-ce4efcbadf01

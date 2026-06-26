@@ -374,6 +374,23 @@ in-repo spec `docs/SPEC-port-upstream-af041ee-0883375.md` and change summary
 - **save_weights overwrite.** Already served from the prior parity window:
   `overwrite` is honored on `save_weights` and `save_weights_for_sampler` with
   no 409-as-success behavior (`TestSaveWeightsHonorsOverwrite`).
+- **Proto forward/backward.** The `forward_backward` route now accepts a
+  protobuf `ForwardBackwardRequest` body (`Content-Type:
+  application/x-protobuf`), optionally zstd-compressed (`Content-Encoding:
+  zstd`), alongside the existing JSON body. The proto is decoded into the same
+  `tinkertrain.ForwardBackwardInput` the JSON path builds and runs the existing
+  training path unchanged; `forward_only` routes to the forward-only path.
+  Integer dtypes collapse to int64 and bfloat16 widens to float32, matching the
+  JSON wire. The public-wire messages live in
+  `internal/tinkerproto/proto/mlxgo/tinker/v1/public.proto`, separate from the
+  internal coordinator/node RPC. Pinned by `TestDecodeForwardBackwardProtoParity`,
+  `TestDecodeProtoBFloat16Widening`, `TestDecodeProtoSparseCsr`, and
+  `TestForwardBackwardProtoRoute`. **Known gap:** the server reads proto but still
+  replies JSON — the proto *response* path (`Accept: application/x-protobuf` on
+  retrieve_future returning a `ForwardBackwardOutput` proto) is not yet
+  implemented, because nothing in localtinker requests it. The `proto_compress_fwdbwd`
+  / `proto_write_fwdbwd` / `fwd_via_fwdbwd` ClientConfig flags are served (see
+  above) but the client send-side behaviors they gate live in the Python SDK.
 - **Checkpoint archive dual contract.** Upstream migrated the archive route from
   a `302` redirect to a `200` JSON `CheckpointArchiveUrlResponse{url, expires}`,
   with both contracts coexisting during the migration: the newer client sends
