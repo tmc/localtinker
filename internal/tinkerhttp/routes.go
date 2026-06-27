@@ -333,7 +333,8 @@ func (s *Server) forwardBackward(w http.ResponseWriter, r *http.Request) {
 // forward-only path. The response is still JSON (the proto response path is a
 // known gap; see the conformance notes).
 func (s *Server) forwardBackwardProto(w http.ResponseWriter, r *http.Request) {
-	body, err := readMaybeCompressed(r)
+	cfg := s.coord.ClientConfig(r.Context())
+	body, err := readMaybeCompressed(r, int64(cfg.MaxRequestBytes))
 	if err != nil {
 		writeUserError(w, http.StatusBadRequest, err.Error())
 		return

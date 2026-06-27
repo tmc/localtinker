@@ -2,6 +2,7 @@ package tinkerhttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"math"
@@ -150,6 +151,10 @@ func TestDecodeProtoSparseCsr(t *testing.T) {
 // TestForwardBackwardProtoRoute submits a protobuf forward_backward request over
 // HTTP, plain and zstd-compressed, and checks the server accepts both and
 // creates a future.
+//
+// The route enqueues a future against any non-empty model_id without loading the
+// model, so the test uses a synthetic model_id and needs no MLX weights — the
+// model-gated training behavior is covered by the JSON forward_backward test.
 func TestForwardBackwardProtoRoute(t *testing.T) {
 	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
 	if err != nil {
@@ -157,16 +162,7 @@ func TestForwardBackwardProtoRoute(t *testing.T) {
 	}
 	h := New(c).Handler()
 
-	var created CreateSessionResponse
-	postJSON(t, h, "/api/v1/create_session", nil, &created)
-	var model map[string]any
-	postJSON(t, h, "/api/v1/create_model",
-		map[string]any{"session_id": created.SessionID, "base_model": "Qwen/Qwen3-8B", "lora_config": map[string]any{"rank": 8}},
-		&model)
-	modelID, _ := model["model_id"].(string)
-	if modelID == "" {
-		t.Fatalf("create_model response = %#v", model)
-	}
+	const modelID = "model-a"
 
 	msg := &tinkerv1.ForwardBackwardRequest{
 		ModelId: modelID,
@@ -223,7 +219,57 @@ func TestForwardBackwardProtoRoute(t *testing.T) {
 	}
 }
 
+// TestForwardBackwardProtoZstdBomb proves the decompressed-size cap rejects a
+// small zstd body that inflates past the request limit, instead of buffering it
+// all into memory. MaxBytesReader bounds only the compressed bytes, so the cap
+// in readMaybeCompressed is what protects this path.
+func TestForwardBackwardProtoZstdBomb(t *testing.T) {
+	c, err := tinkercoord.New(tinkercoord.Config{Store: tinkerdb.OpenMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(c).Handler()
+
+	limit := int(c.ClientConfig(context.Background()).MaxRequestBytes)
+	if limit <= 0 {
+		t.Fatalf("MaxRequestBytes = %d, want > 0", limit)
+	}
+
+	// A highly compressible payload larger than the limit: a few bytes of zstd
+	// that inflate well past MaxRequestBytes.
+	var compressed bytes.Buffer
+	enc, err := zstd.NewWriter(&compressed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := enc.Write(bytes.Repeat([]byte{0}, limit+1024)); err != nil {
+		t.Fatal(err)
+	}
+	if err := enc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if compressed.Len() >= limit {
+		t.Fatalf("compressed payload %d not below limit %d; test would not exercise the cap", compressed.Len(), limit)
+	}
+
+	rec := postProtoStatus(t, h, compressed.Bytes(), "zstd")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("zstd bomb status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 func postProto(t *testing.T, h http.Handler, body []byte, encoding string, out any) {
+	t.Helper()
+	rec := postProtoStatus(t, h, body, encoding)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("proto forward_backward status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if err := json.NewDecoder(rec.Body).Decode(out); err != nil {
+		t.Fatalf("decode proto forward_backward response: %v", err)
+	}
+}
+
+func postProtoStatus(t *testing.T, h http.Handler, body []byte, encoding string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/forward_backward", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/x-protobuf")
@@ -232,10 +278,5 @@ func postProto(t *testing.T, h http.Handler, body []byte, encoding string, out a
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("proto forward_backward status = %d body = %s", rec.Code, rec.Body.String())
-	}
-	if err := json.NewDecoder(rec.Body).Decode(out); err != nil {
-		t.Fatalf("decode proto forward_backward response: %v", err)
-	}
+	return rec
 }

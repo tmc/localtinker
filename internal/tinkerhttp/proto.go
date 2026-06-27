@@ -26,14 +26,31 @@ func isProtoContent(r *http.Request) bool {
 
 // readMaybeCompressed reads the request body, decompressing it first when the
 // request sets Content-Encoding: zstd (mirroring the upstream ASGI middleware).
-func readMaybeCompressed(r *http.Request) ([]byte, error) {
+//
+// MaxBytesReader bounds the compressed request body, but decompression can
+// expand a small payload without limit, so the decompressed read is capped at
+// maxBytes to keep both paths within the same budget. A non-positive maxBytes
+// disables the cap.
+func readMaybeCompressed(r *http.Request, maxBytes int64) ([]byte, error) {
 	if strings.EqualFold(strings.TrimSpace(r.Header.Get("Content-Encoding")), "zstd") {
 		dec, err := zstd.NewReader(r.Body)
 		if err != nil {
 			return nil, fmt.Errorf("init zstd reader: %w", err)
 		}
 		defer dec.Close()
-		return io.ReadAll(dec)
+		if maxBytes <= 0 {
+			return io.ReadAll(dec)
+		}
+		// Read one byte past the cap so an exactly-maxBytes body is accepted
+		// and anything larger is rejected.
+		body, err := io.ReadAll(io.LimitReader(dec, maxBytes+1))
+		if err != nil {
+			return nil, err
+		}
+		if int64(len(body)) > maxBytes {
+			return nil, fmt.Errorf("decompressed body exceeds %d bytes", maxBytes)
+		}
+		return body, nil
 	}
 	return io.ReadAll(r.Body)
 }
