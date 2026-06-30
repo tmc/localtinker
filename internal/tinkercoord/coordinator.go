@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/tmc/localtinker/internal/tinkerdb"
+	"github.com/tmc/localtinker/internal/tinkerid"
+	"github.com/tmc/localtinker/internal/tinkerledger"
 	"github.com/tmc/localtinker/internal/tinkertrain"
 )
 
@@ -42,6 +44,7 @@ type Coordinator struct {
 	maxOperations int
 	leaseTimeout  time.Duration
 	cancelHook    func(context.Context, tinkerdb.Future) error
+	ledger        *tinkerledger.Ledger
 	sem           chan struct{}
 	wg            sync.WaitGroup
 	mu            sync.Mutex
@@ -57,6 +60,9 @@ type Config struct {
 	MaxOperations   int
 	LeaseTimeout    time.Duration
 	CancelHook      func(context.Context, tinkerdb.Future) error
+	// Ledger is the reward ledger. A nil ledger (the default) means rewards are
+	// off: no entries accrue and the dashboard reports no balances.
+	Ledger *tinkerledger.Ledger
 }
 
 type Session struct {
@@ -159,6 +165,16 @@ type DashboardSnapshot struct {
 	Nodes        []DashboardNode    `json:"nodes"`
 	Models       []DashboardModel   `json:"models"`
 	Futures      []DashboardFuture  `json:"futures"`
+	// Ledger summarizes the reward ledger when rewards are enabled; nil when off.
+	Ledger *DashboardLedger `json:"ledger,omitempty"`
+}
+
+// DashboardLedger summarizes the reward ledger for the dashboard: its
+// independently-auditable merkle root and entry count. Per-node balances appear
+// on each [DashboardNode].
+type DashboardLedger struct {
+	Root    string `json:"root"`
+	Entries int    `json:"entries"`
 }
 
 type QueueState struct {
@@ -197,6 +213,9 @@ type DashboardNode struct {
 	StartedAt      time.Time         `json:"started_at,omitempty"`
 	LastSeenAt     time.Time         `json:"last_seen_at,omitempty"`
 	DrainingSince  time.Time         `json:"draining_since,omitempty"`
+	// Credits is the node's accrued reward balance; zero when rewards are off
+	// or the node id is not a mesh public key.
+	Credits int64 `json:"credits,omitempty"`
 }
 
 type DashboardFuture struct {
@@ -250,6 +269,7 @@ func New(cfg Config) (*Coordinator, error) {
 		maxOperations:   cfg.MaxOperations,
 		leaseTimeout:    cfg.LeaseTimeout,
 		cancelHook:      cfg.CancelHook,
+		ledger:          cfg.Ledger,
 		sem:             make(chan struct{}, cfg.MaxOperations),
 		runs:            make(map[string]operationFunc),
 	}
@@ -438,7 +458,9 @@ func (c *Coordinator) DashboardSnapshot(ctx context.Context) (DashboardSnapshot,
 	})
 	outNodes := make([]DashboardNode, 0, len(nodes))
 	for _, node := range nodes {
-		outNodes = append(outNodes, dashboardNode(node))
+		dn := dashboardNode(node)
+		dn.Credits = c.nodeCredits(node.ID)
+		outNodes = append(outNodes, dn)
 	}
 	sort.Slice(outNodes, func(i, j int) bool {
 		return outNodes[i].ID < outNodes[j].ID
@@ -461,8 +483,41 @@ func (c *Coordinator) DashboardSnapshot(ctx context.Context) (DashboardSnapshot,
 		Nodes:        outNodes,
 		Models:       outModels,
 		Futures:      outFutures,
+		Ledger:       c.dashboardLedger(),
 	}, nil
 }
+
+// dashboardLedger summarizes the reward ledger, or nil when rewards are off.
+func (c *Coordinator) dashboardLedger() *DashboardLedger {
+	if !c.ledger.Enabled() {
+		return nil
+	}
+	root := c.ledger.Root()
+	return &DashboardLedger{
+		Root:    hex.EncodeToString(root[:]),
+		Entries: c.ledger.Len(),
+	}
+}
+
+// nodeCredits returns a node's accrued reward balance. A node id that is not a
+// mesh public key (the legacy string id, or the local coordinator) has no
+// balance and returns zero.
+func (c *Coordinator) nodeCredits(nodeID string) int64 {
+	if !c.ledger.Enabled() {
+		return 0
+	}
+	raw, err := hex.DecodeString(nodeID)
+	if err != nil || len(raw) != len(tinkerid.NodeID{}) {
+		return 0
+	}
+	var id tinkerid.NodeID
+	copy(id[:], raw)
+	return c.ledger.Balance(id)
+}
+
+// Ledger returns the coordinator's reward ledger, nil when rewards are off. It
+// exposes the merkle root for external audit via [tinkerledger.Ledger.Root].
+func (c *Coordinator) Ledger() *tinkerledger.Ledger { return c.ledger }
 
 func (c *Coordinator) TrainingRuns(ctx context.Context, limit, offset int) (TrainingRunsResponse, error) {
 	if limit <= 0 {
