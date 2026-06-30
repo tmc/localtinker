@@ -40,6 +40,8 @@ type Store interface {
 	GetCheckpoint(context.Context, string) (Checkpoint, error)
 	ListCheckpoints(context.Context) ([]Checkpoint, error)
 	DeleteCheckpoint(context.Context, string) error
+	AppendLedgerEntry(context.Context, json.RawMessage) error
+	ListLedgerEntries(context.Context) ([]json.RawMessage, error)
 	Close() error
 }
 
@@ -139,6 +141,11 @@ type diskState struct {
 	Futures     map[string]Future        `json:"futures"`
 	Attempts    map[string]FutureAttempt `json:"attempts"`
 	Checkpoints map[string]Checkpoint    `json:"checkpoints"`
+	// Ledger is the append-only reward ledger, stored as ordered opaque JSON so
+	// tinkerdb does not depend on the ledger's schema or crypto types. The
+	// tinkerledger package owns the entry format and the merkle/signature
+	// semantics; tinkerdb only persists the ordered bytes.
+	Ledger []json.RawMessage `json:"ledger,omitempty"`
 }
 
 func OpenJSON(path string) (*JSONStore, error) {
@@ -512,6 +519,28 @@ func (s *JSONStore) DeleteCheckpoint(_ context.Context, path string) error {
 	defer s.mu.Unlock()
 	delete(s.data.Checkpoints, path)
 	return s.saveLocked()
+}
+
+// AppendLedgerEntry appends one opaque ledger entry to the append-only ledger.
+// The entry's schema and ordering are the tinkerledger package's concern;
+// tinkerdb stores the bytes in append order and never rewrites them.
+func (s *JSONStore) AppendLedgerEntry(_ context.Context, entry json.RawMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.init()
+	s.data.Ledger = append(s.data.Ledger, cloneRaw(entry))
+	return s.saveLocked()
+}
+
+// ListLedgerEntries returns the ledger entries in append order.
+func (s *JSONStore) ListLedgerEntries(_ context.Context) ([]json.RawMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]json.RawMessage, 0, len(s.data.Ledger))
+	for _, e := range s.data.Ledger {
+		out = append(out, cloneRaw(e))
+	}
+	return out, nil
 }
 
 func (s *JSONStore) Close() error { return nil }
