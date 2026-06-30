@@ -26,6 +26,8 @@ github.com/tmc/mlx-go v0.0.0-20260430055908-2a38bf0f0098 h1:nYnAH/CBJnwQxOfQALzZ
 github.com/tmc/mlx-go v0.0.0-20260430055908-2a38bf0f0098/go.mod h1:lM7En3SYwMNu+4W3PqaOlTy8y06UJqzffl1X9cm8n84=
 github.com/tmc/mlx-go-iroh v0.1.0 h1:1UOfjhwqQM9qG66CoK0OpSqifzFmv2bv8unELameKuc=
 github.com/tmc/mlx-go-iroh v0.1.0/go.mod h1:IyhuqiThdgqJkjO+oehdlnWIIwxiF+lsgstljEX1kJU=
+github.com/tmc/mlx-go-iroh v0.1.1 h1:Gg8PxMkkvDW8X85ktEjJCYb2egChq3mni92UGBevHFI=
+github.com/tmc/mlx-go-iroh v0.1.1/go.mod h1:IyhuqiThdgqJkjO+oehdlnWIIwxiF+lsgstljEX1kJU=
 github.com/tmc/mlx-go-lm v0.0.0-20260430055726-ce4efcbadf01 h1:IfkTwUvxMgHB0zYY46Cd6SxUQnQv3bqdUsym6LYarZ4=
 github.com/tmc/mlx-go-lm v0.0.0-20260430055726-ce4efcbadf01/go.mod h1:qQtCCjbu1O8atPZEH16nIiCXVX0p2t/LfyoLRP7yQkk=
 github.com/tmc/modelir v0.0.0-20260430035034-7c8a1bc7d1c4 h1:tn1kjh46+th9+MUp1XvnAqSmOY5RIPCxJ0k0MdVOj4Y=

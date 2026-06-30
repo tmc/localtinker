@@ -6,7 +6,7 @@ require (
 	connectrpc.com/connect v1.19.2
 	github.com/tmc/apple v0.5.5
 	github.com/tmc/mlx-go v0.0.0-20260430055908-2a38bf0f0098
-	github.com/tmc/mlx-go-iroh v0.1.0
+	github.com/tmc/mlx-go-iroh v0.1.1
 	github.com/tmc/mlx-go-lm v0.0.0-20260430055726-ce4efcbadf01
 	google.golang.org/protobuf v1.36.11
 	rsc.io/script v0.0.2
